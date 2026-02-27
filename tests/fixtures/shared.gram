@@ -1,0 +1,17 @@
+#JSGF V1.0;
+grammar com.example.shared;
+
+public <cardinal> = zero | one | two | three | four | five |
+                    six | seven | eight | nine | ten |
+                    (eleven | twelve | thirteen | fourteen | fifteen |
+                     sixteen | seventeen | eighteen | nineteen) |
+                    (twenty | thirty | forty | fifty |
+                     sixty | seventy | eighty | ninety) [<cardinal>] |
+                    (one | two | three | four | five | six | seven |
+                     eight | nine) hundred [and <cardinal>];
+
+public <currency> = dollars | euros | pounds;
+
+public <amount> = <cardinal> [<currency>];
+
+public <account_type> = savings | chequing | checking | current;

@@ -1,0 +1,6 @@
+#JSGF V1.0;
+grammar com.example.broken;
+
+public <valid_rule> = hello | hi;
+
+public <broken_rule> = (unclosed group;

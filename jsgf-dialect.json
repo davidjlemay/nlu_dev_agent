@@ -1,0 +1,40 @@
+{
+  "engine": "proprietary-asr-v2",
+  "version": "1.0",
+  "flags": {
+    "allowed_types": ["string", "int", "float", "bool", "enum"],
+    "reserved_keys": ["intent", "slot", "min_conf", "requires_auth", "log_level"]
+  },
+  "functions": {
+    "normalise": {
+      "parameters": [
+        { "name": "value", "type": "rule_ref" },
+        { "name": "unit",  "type": "string"  }
+      ],
+      "return_type": "expansion",
+      "doc": "Normalises numeric value to canonical form for the given unit."
+    },
+    "lookup": {
+      "parameters": [
+        { "name": "dict",   "type": "string" },
+        { "name": "locale", "type": "string", "optional": true }
+      ],
+      "return_type": "expansion",
+      "doc": "Dynamic vocabulary lookup from engine dictionary."
+    },
+    "extract": {
+      "parameters": [
+        { "name": "source",   "type": "rule_ref" },
+        { "name": "type",     "type": "string"   },
+        { "name": "min_conf", "type": "float",    "optional": true }
+      ],
+      "return_type": "slot",
+      "doc": "Slot extraction with optional confidence threshold."
+    }
+  },
+  "reserved_rules": ["VOID", "NULL", "GARBAGE"],
+  "tag_extensions": {
+    "allow_multiline": true,
+    "value_interpolation": true
+  }
+}

@@ -1,0 +1,18 @@
+#JSGF V1.0;
+grammar com.example.transfer;
+
+import <com.example.shared.*>;
+
+public <transfer> =
+    (transfer | move | send) <amount>
+    [from <account_type>]
+    (to | into) <account_type>
+    {intent:string=transfer_funds, requires_auth:bool=true};
+
+public <transfer_confirm> =
+    (yes | confirm | ok | proceed | that is correct)
+    {intent:string=confirm, polarity:bool=true};
+
+public <transfer_cancel> =
+    (no | cancel | stop | never mind)
+    {intent:string=cancel, polarity:bool=false};

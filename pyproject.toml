@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "nlu-dev-agent"
+version = "0.1.0"
+description = "JSGF language server, grammar analysis API, and LLM-powered coding agent"
+requires-python = ">=3.12"
+dependencies = [
+    "pyjsgf",
+    "pyparsing>=3.0",
+    "pygls>=2.0",
+    "lsprotocol>=2025.0",
+    "six",
+]
+
+[project.optional-dependencies]
+generation = [
+    "anthropic>=0.40",
+    "dspy>=2.5",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio",
+]
+
+[project.scripts]
+jsgf-lsp    = "lsp.server:server.start_io"
+jsgf-validate = "skills.jsgf-validate.validate:main"
+jsgf-coverage = "skills.jsgf-coverage.coverage:main"
+jsgf-context  = "skills.jsgf-context.context:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core*", "lsp*", "agent*", "skills*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

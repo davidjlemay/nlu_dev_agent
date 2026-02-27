@@ -1,0 +1,8 @@
+#JSGF V1.0;
+grammar com.example.greeting;
+
+import <com.example.shared.*>;
+
+public <greeting> = (hello | hi | hey | good morning | good afternoon) {intent:string=greet};
+
+public <farewell> = (goodbye | bye | see you | take care) {intent:string=farewell};
