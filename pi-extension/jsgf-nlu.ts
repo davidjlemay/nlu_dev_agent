@@ -1,173 +1,214 @@
 /**
- * jsgf-nlu.ts — pi coding agent extension for JSGF grammar development
+ * jsgf-nlu — pi coding agent extension for JSGF grammar development
  *
- * Registers three domain tools and one slash command:
- *   jsgf_validate   — validate a .gram file and return structured diagnostics
- *   jsgf_coverage   — check utterance coverage for a named rule
- *   jsgf_context    — get generation context before writing a new rule
- *   /generate-intent — interactive command to generate a JSGF rule from an intent
+ * Registers three domain tools and one slash command that wire the agent
+ * to the Python core layer (via CLI skills in skills/jsgf-*/):
+ *
+ *   jsgf_validate    — validate a .gram file; returns structured diagnostics
+ *   jsgf_coverage    — check utterance coverage for a named rule
+ *   jsgf_context     — get generation context before writing a new rule
+ *   /generate-intent — interactive command to generate a JSGF rule
  */
 
-import type { ExtensionContext } from '@mariozechner/pi-coding-agent';
-import * as path from 'path';
+import { Type } from "@mariozechner/pi-ai";
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import * as path from "path";
 
-export async function activate(ctx: ExtensionContext) {
-  const { pi } = ctx;
+export default function (pi: ExtensionAPI) {
+	// ---------------------------------------------------------------- //
+	//  Helpers                                                           //
+	// ---------------------------------------------------------------- //
 
-  // ------------------------------------------------------------------ //
-  //  Tool: jsgf_validate                                                 //
-  // ------------------------------------------------------------------ //
-  pi.registerTool({
-    name: 'jsgf_validate',
-    description: `Validate a JSGF grammar file against the workspace index.
-Returns structured diagnostics: undefined rules, broken imports, duplicate
-definitions, and dialect violations.
+	/** Resolve a path relative to project root (ctx.cwd at call time). */
+	function skill(ctx: { cwd: string }, scriptName: string): string {
+		return path.join(ctx.cwd, "skills", scriptName);
+	}
 
-Use this:
+	function python(ctx: { cwd: string }): string {
+		return path.join(ctx.cwd, ".venv", "bin", "python3");
+	}
+
+	// ---------------------------------------------------------------- //
+	//  Tool: jsgf_validate                                              //
+	// ---------------------------------------------------------------- //
+	pi.registerTool({
+		name: "jsgf_validate",
+		label: "JSGF Validate",
+		description: `Validate a JSGF grammar file against the workspace index.
+
+Returns structured diagnostics: undefined rule references, broken imports,
+duplicate rule definitions, and dialect violations (flag types, function arity).
+
+Use this tool:
 - Before and after ANY grammar edit to verify correctness
 - In the correction loop after generating a grammar
-- To check if an existing grammar is valid before referencing its rules
+- To check if a grammar file is valid before referencing its rules
 
 Returns JSON: { file, valid, diagnostics: [{line, character, severity, message}] }`,
-    parameters: {
-      file: {
-        type: 'string',
-        description: 'Absolute or workspace-relative path to the .gram file',
-      },
-      workspace: {
-        type: 'string',
-        description: 'Workspace root (optional; defaults to file parent directory)',
-        optional: true,
-      },
-    },
-    async execute({ file, workspace }: { file: string; workspace?: string }) {
-      const args = [
-        path.resolve(ctx.workspaceRoot, 'skills/jsgf-validate/validate.py'),
-        file,
-      ];
-      if (workspace) {
-        args.push('--workspace', workspace);
-      }
-      const r = await pi.exec('python', args);
-      return JSON.parse(r.stdout);
-    },
-  });
+		parameters: Type.Object({
+			file: Type.String({ description: "Path to the .gram file to validate (absolute or relative to cwd)" }),
+			workspace: Type.Optional(
+				Type.String({ description: "Workspace root directory (defaults to file's parent directory)" }),
+			),
+		}),
 
-  // ------------------------------------------------------------------ //
-  //  Tool: jsgf_coverage                                                 //
-  // ------------------------------------------------------------------ //
-  pi.registerTool({
-    name: 'jsgf_coverage',
-    description: `Check whether a JSGF rule matches a list of test utterances.
-Returns covered/uncovered lists and a coverage_ratio (0.0–1.0).
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const args: string[] = [
+				skill(ctx, "jsgf-validate/validate.py"),
+				params.file,
+			];
+			if (params.workspace) {
+				args.push("--workspace", params.workspace);
+			} else {
+				args.push("--workspace", ctx.cwd);
+			}
 
-Use this:
+			const result = await pi.exec(python(ctx), args);
+			const text = result.stdout.trim() || result.stderr.trim();
+			return {
+				content: [{ type: "text", text }],
+				details: { stdout: result.stdout, stderr: result.stderr, exitCode: result.code },
+			};
+		},
+	});
+
+	// ---------------------------------------------------------------- //
+	//  Tool: jsgf_coverage                                              //
+	// ---------------------------------------------------------------- //
+	pi.registerTool({
+		name: "jsgf_coverage",
+		label: "JSGF Coverage",
+		description: `Check whether a JSGF rule matches a list of test utterances.
+
+Returns covered/uncovered lists and a coverage_ratio (0.0 = none, 1.0 = all).
+
+Use this tool:
 - After generating a grammar to verify it matches all required utterances
 - To identify gaps when coverage_ratio < 1.0
-- In the correction loop — pass uncovered utterances to the correction prompt
+- When building the correction prompt — pass the uncovered list as the target
 
 Returns JSON: { rule, file, coverage_ratio, covered, uncovered }`,
-    parameters: {
-      rule: {
-        type: 'string',
-        description: 'Rule name without angle brackets',
-      },
-      file: {
-        type: 'string',
-        description: 'Path to the .gram file defining the rule',
-      },
-      utterances: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'List of utterances to test against the rule',
-      },
-    },
-    async execute({ rule, file, utterances }: { rule: string; file: string; utterances: string[] }) {
-      const r = await pi.exec('python', [
-        path.resolve(ctx.workspaceRoot, 'skills/jsgf-coverage/coverage.py'),
-        rule,
-        file,
-        '--utterances',
-        JSON.stringify(utterances),
-      ]);
-      return JSON.parse(r.stdout);
-    },
-  });
+		parameters: Type.Object({
+			rule: Type.String({ description: "Rule name without angle brackets (e.g. 'greeting' not '<greeting>')" }),
+			file: Type.String({ description: "Path to the .gram file defining the rule" }),
+			utterances: Type.Array(Type.String(), {
+				description: "Utterances to test against the rule",
+			}),
+		}),
 
-  // ------------------------------------------------------------------ //
-  //  Tool: jsgf_context                                                  //
-  // ------------------------------------------------------------------ //
-  pi.registerTool({
-    name: 'jsgf_context',
-    description: `Get generation context for a target JSGF file before writing a new rule.
-Returns existing visible rules, dialect functions, similar rules, and import suggestions.
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const args: string[] = [
+				skill(ctx, "jsgf-coverage/coverage.py"),
+				params.rule,
+				params.file,
+				"--utterances",
+				JSON.stringify(params.utterances),
+				"--workspace",
+				ctx.cwd,
+			];
 
-ALWAYS call this before generating a new grammar rule. It tells you:
-- Which rules already exist and can be reused/imported (avoids duplication)
-- Which dialect functions ($normalise, $lookup, $extract) are available
-- Which existing rules partially cover your target utterances
-- Which files to import for shared vocabulary
+			const result = await pi.exec(python(ctx), args);
+			const text = result.stdout.trim() || result.stderr.trim();
+			return {
+				content: [{ type: "text", text }],
+				details: { stdout: result.stdout, stderr: result.stderr, exitCode: result.code },
+			};
+		},
+	});
+
+	// ---------------------------------------------------------------- //
+	//  Tool: jsgf_context                                               //
+	// ---------------------------------------------------------------- //
+	pi.registerTool({
+		name: "jsgf_context",
+		label: "JSGF Context",
+		description: `Get generation context for a target JSGF file before writing a new rule.
+
+Returns:
+- existing_rules: all visible rules accessible from the target file (local + imported)
+- dialect_functions: engine-specific functions from jsgf-dialect.json
+- similar_rules: top rules with partial coverage of your example utterances
+- import_suggestions: files worth importing for shared vocabulary
+
+ALWAYS call this before generating a new rule to avoid duplication and discover
+reusable rules and dialect functions.
 
 Returns JSON: { existing_rules, dialect_functions, similar_rules, import_suggestions }`,
-    parameters: {
-      file: {
-        type: 'string',
-        description: 'Target .gram file (need not exist yet)',
-      },
-      intent: {
-        type: 'string',
-        description: 'Natural language description of the intent',
-      },
-      examples: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Example utterances that the new rule should match',
-      },
-    },
-    async execute({ file, intent, examples }: { file: string; intent: string; examples: string[] }) {
-      const r = await pi.exec('python', [
-        path.resolve(ctx.workspaceRoot, 'skills/jsgf-context/context.py'),
-        file,
-        '--intent', intent,
-        '--examples', JSON.stringify(examples),
-      ]);
-      return JSON.parse(r.stdout);
-    },
-  });
+		parameters: Type.Object({
+			file: Type.String({ description: "Target .gram file (need not exist yet)" }),
+			intent: Type.String({ description: "Natural language description of the intent to implement" }),
+			examples: Type.Array(Type.String(), {
+				description: "Example utterances the new rule should match",
+			}),
+		}),
 
-  // ------------------------------------------------------------------ //
-  //  Command: /generate-intent                                           //
-  // ------------------------------------------------------------------ //
-  pi.registerCommand('generate-intent', {
-    description: 'Generate a JSGF grammar rule from an intent description',
-    async handler(cmdCtx: any) {
-      const targetFile = await cmdCtx.ui.prompt(
-        'Target .gram file path (e.g. grammars/transfer.gram):'
-      );
-      const description = await cmdCtx.ui.prompt(
-        'Intent description (e.g. "Transfer funds between accounts"):'
-      );
-      const examplesRaw = await cmdCtx.ui.prompt(
-        'Example utterances (comma-separated):'
-      );
-      const examples = examplesRaw
-        .split(',')
-        .map((s: string) => s.trim())
-        .filter(Boolean);
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const args: string[] = [
+				skill(ctx, "jsgf-context/context.py"),
+				params.file,
+				"--intent",
+				params.intent,
+				"--examples",
+				JSON.stringify(params.examples),
+				"--workspace",
+				ctx.cwd,
+			];
 
-      await pi.steer(
-        `Generate a JSGF grammar rule for the following intent:\n` +
-        `File: ${targetFile}\n` +
-        `Description: ${description}\n` +
-        `Required utterances:\n${examples.map((e: string) => `  - ${e}`).join('\n')}\n\n` +
-        `Step-by-step instructions:\n` +
-        `1. Call jsgf_context to understand what rules and functions already exist\n` +
-        `2. Write the JSGF grammar source for the intent\n` +
-        `3. Call jsgf_validate to check for structural errors\n` +
-        `4. Call jsgf_coverage to verify all utterances are covered\n` +
-        `5. If there are errors or uncovered utterances, correct and repeat from step 3\n` +
-        `6. Once valid with 100% coverage, write the grammar to ${targetFile}`
-      );
-    },
-  });
+			const result = await pi.exec(python(ctx), args);
+			const text = result.stdout.trim() || result.stderr.trim();
+			return {
+				content: [{ type: "text", text }],
+				details: { stdout: result.stdout, stderr: result.stderr, exitCode: result.code },
+			};
+		},
+	});
+
+	// ---------------------------------------------------------------- //
+	//  Command: /generate-intent                                        //
+	// ---------------------------------------------------------------- //
+	pi.registerCommand("generate-intent", {
+		description: "Generate a JSGF grammar rule from an intent description",
+		handler: async (_args, ctx) => {
+			const targetFile = await ctx.ui.input(
+				"Target grammar file",
+				"e.g. grammars/transfer.gram",
+			);
+			if (!targetFile) return;
+
+			const intentDesc = await ctx.ui.input(
+				"Intent description",
+				"e.g. Transfer funds between accounts",
+			);
+			if (!intentDesc) return;
+
+			const examplesRaw = await ctx.ui.input(
+				"Example utterances",
+				"Comma-separated, e.g. transfer 100 to savings, move fifty dollars",
+			);
+			if (!examplesRaw) return;
+
+			const examples = examplesRaw
+				.split(",")
+				.map((s) => s.trim())
+				.filter(Boolean);
+
+			const prompt =
+				`Generate a JSGF grammar rule for the following intent.\n\n` +
+				`**Target file:** ${targetFile}\n` +
+				`**Intent:** ${intentDesc}\n` +
+				`**Required utterances** (the rule MUST match ALL of these):\n` +
+				examples.map((e) => `  - ${e}`).join("\n") +
+				`\n\n` +
+				`**Steps:**\n` +
+				`1. Call \`jsgf_context\` with file="${targetFile}", intent="${intentDesc}", ` +
+				`and the examples above to understand available rules and dialect functions.\n` +
+				`2. Write the JSGF grammar source.\n` +
+				`3. Call \`jsgf_validate\` to check for structural errors.\n` +
+				`4. Call \`jsgf_coverage\` to verify all utterances are covered.\n` +
+				`5. If there are errors or uncovered utterances, correct and repeat from step 3.\n` +
+				`6. Once valid with 100% coverage, write the grammar to \`${targetFile}\`.`;
+
+			pi.sendUserMessage(prompt);
+		},
+	});
 }
