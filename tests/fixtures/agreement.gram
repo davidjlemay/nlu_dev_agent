@@ -1,0 +1,12 @@
+#JSGF V1.0;
+grammar com.example.agreement;
+
+// LHS flags carry morphological metadata used for cross-rule agreement checks.
+// The 'number' flag lets tooling verify that <item_*> and <verb_*> rules
+// with the same number value are used together consistently.
+
+public <item_singular> {number:enum=singular} = book | pen | table;
+public <item_plural>   {number:enum=plural}   = books | pens | tables;
+
+public <verb_singular> {number:enum=singular} = is | was | has;
+public <verb_plural>   {number:enum=plural}   = are | were | have;

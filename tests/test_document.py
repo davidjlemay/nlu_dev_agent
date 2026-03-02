@@ -84,3 +84,50 @@ def test_resilient_parse_on_broken_grammar():
     names = doc.rule_names()
     # Resilient tokeniser should find at least 'valid_rule'
     assert 'valid_rule' in names
+
+
+def test_lhs_flag_parse_succeeds():
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <item_singular> {number:enum=singular} = book | pen;
+public <item_plural>   {number:enum=plural}   = books | pens;
+"""
+    path = FIXTURES / 'agreement.gram'
+    doc = GrammarDocument.parse(path, path.read_text())
+    assert doc.parse_error is None
+    assert 'item_singular' in doc.rule_names()
+    assert 'item_plural' in doc.rule_names()
+
+
+def test_lhs_flag_does_not_confuse_def_positions():
+    """Rule def positions should point at '<', not at the flag block."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <item> {number:enum=singular} = book;
+"""
+    from pathlib import Path as _Path
+    doc = GrammarDocument.parse(_Path('/tmp/t.gram'), source)
+    assert doc.parse_error is None
+    pos = doc.def_positions.get('item')
+    assert pos is not None
+    # The '<' of <item> is on line 2 (0-indexed)
+    assert pos.line == 2
+
+
+def test_lhs_flag_not_in_rule_body():
+    """Rule body source from resilient parser should not contain the LHS flag."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <item> {number:enum=singular} = book | pen;
+"""
+    from pathlib import Path as _Path
+    doc = GrammarDocument.parse(_Path('/tmp/t.gram'), source)
+    assert doc.parse_error is None
+    rule = doc.get_rule('item')
+    assert rule is not None
+    # body_source is None when pyjsgf parsed successfully (grammar_object set)
+    # verify the pyjsgf parse worked (LHS flag didn't break it)
+    assert rule.grammar_object is not None

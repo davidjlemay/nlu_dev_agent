@@ -3,7 +3,8 @@
   "version": "1.0",
   "flags": {
     "allowed_types": ["string", "int", "float", "bool", "enum"],
-    "reserved_keys": ["intent", "slot", "min_conf", "requires_auth", "log_level"]
+    "reserved_keys": ["intent", "slot", "min_conf", "requires_auth", "log_level"],
+    "allow_lhs": true
   },
   "functions": {
     "normalise": {

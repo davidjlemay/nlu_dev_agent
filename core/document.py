@@ -31,14 +31,22 @@ if TYPE_CHECKING:
 # Lazy import to avoid circular deps at module level
 def _strip_dialect_tags(source: str) -> str:
     """
-    Replace dialect tag content with a plain identifier so pyjsgf can parse it.
+    Prepare source for pyjsgf parsing by neutralising dialect extensions:
 
-    pyjsgf's tag regex only allows [\\w\\-\\'] characters.  Dialect tags
-    like {intent:string=greet} contain ':', '=' and ',' which pyjsgf rejects.
-    Stripping to {tag} preserves the structural meaning (there is a tag) while
-    allowing pyjsgf to build a correct AST for rule-ref and import analysis.
+    1. LHS flags — {…} blocks between > and = on rule declarations — are
+       removed entirely.  pyjsgf has no concept of rule-level metadata and
+       would reject even a sanitised {tag} token in that position.
+
+    2. Remaining RHS tags (in expansion bodies) are replaced with {tag} so
+       that pyjsgf can build a correct AST for rule-ref and import analysis.
+       pyjsgf's tag regex only allows [\\w\\-\\'] so dialect content like
+       {intent:string=greet} must be stripped.
+
     Dialect-specific validation is done separately by core/validator.py.
     """
+    # Step 1: remove LHS flag blocks (one or more {…} between > and =)
+    source = re.sub(r'(?<=>)(\s*\{[^}]*\})+(?=\s*=)', '', source)
+    # Step 2: replace remaining RHS dialect tag content with a plain token
     return re.sub(r'\{[^}]*\}', '{tag}', source)
 
 
@@ -287,9 +295,9 @@ def _resilient_parse(
             position=def_positions.get(full_name, Position(0, 0)),
         ))
 
-    # Find rule definitions: optional 'public' <name> =  ...  ;
+    # Find rule definitions: optional 'public' <name> [lhs-flags] = ... ;
     for m in re.finditer(
-        r'(public\s+)?<([A-Za-z0-9_.$-]+)>\s*=([^;]+);', source, re.DOTALL
+        r'(public\s+)?<([A-Za-z0-9_.$-]+)>(?:\s*\{[^}]*\})*\s*=([^;]+);', source, re.DOTALL
     ):
         visible = bool(m.group(1))
         name = m.group(2)

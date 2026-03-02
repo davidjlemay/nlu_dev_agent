@@ -60,8 +60,8 @@ def scan_rule_def_positions(source: str) -> dict[str, Position]:
     """
     offsets = _line_offsets(source)
     positions: dict[str, Position] = {}
-    # Matches optional 'public', then '<ruleName>'
-    for m in re.finditer(r'(?:public\s+)?<([A-Za-z0-9_.$-]+)>\s*=', source):
+    # Matches optional 'public', '<ruleName>', optional LHS flag blocks, then '='
+    for m in re.finditer(r'(?:public\s+)?<([A-Za-z0-9_.$-]+)>(?:\s*\{[^}]*\})*\s*=', source):
         name = m.group(1)
         # Position at the '<'
         angle_offset = m.start(1) - 1  # the '<' before the name

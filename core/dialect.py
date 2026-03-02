@@ -38,6 +38,7 @@ class DialectRegistry:
     reserved_flag_keys: list[str] = field(default_factory=list)
     allow_multiline_tags: bool = False
     value_interpolation: bool = False
+    lhs_flags_enabled: bool = False
 
     @classmethod
     def from_config(cls, path: Path) -> DialectRegistry:
@@ -68,6 +69,7 @@ class DialectRegistry:
             reserved_flag_keys=flags.get('reserved_keys', []),
             allow_multiline_tags=tag_ext.get('allow_multiline', False),
             value_interpolation=tag_ext.get('value_interpolation', False),
+            lhs_flags_enabled=flags.get('allow_lhs', False),
         )
 
     @classmethod

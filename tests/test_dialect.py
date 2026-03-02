@@ -78,3 +78,13 @@ def test_reserved_rules():
     registry = DialectRegistry.from_config(DIALECT_JSON)
     assert 'VOID' in registry.reserved_rules
     assert 'NULL' in registry.reserved_rules
+
+
+def test_lhs_flags_enabled_from_config():
+    registry = DialectRegistry.from_config(DIALECT_JSON)
+    assert registry.lhs_flags_enabled is True
+
+
+def test_lhs_flags_disabled_in_standard_dialect():
+    registry = DialectRegistry.standard()
+    assert registry.lhs_flags_enabled is False

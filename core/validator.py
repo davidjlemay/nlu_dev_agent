@@ -22,13 +22,22 @@ from .patch import Position
 from .document import GrammarDocument, _pos_to_range
 
 
-# Typed flag pattern:  key:type=value  (value may contain |)
+# Typed flag pattern:  key:type=value
+# Captures any type name; dialect.validate_flag() decides if it is allowed.
 _FLAG_RE = re.compile(
-    r'([A-Za-z_][A-Za-z0-9_]*):(string|int|float|bool|enum)=([^,}]+)'
+    r'([A-Za-z_][A-Za-z0-9_]*):([A-Za-z_][A-Za-z0-9_]*)=([^,}]+)'
 )
 
 # Function call pattern: $name(...)
 _FUNC_RE = re.compile(r'\$([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\)')
+
+# LHS flag block(s): one or more {…} between '>' and '=' on a rule declaration.
+# Captures the run of flag blocks (group 1) so individual blocks can be re-scanned.
+_LHS_RULE_RE = re.compile(
+    r'(?:public\s+)?<[A-Za-z0-9_.$-]+>'   # rule header
+    r'((?:\s*\{[^}]*\})+)'                 # one or more LHS flag blocks (captured)
+    r'\s*='                                # then =
+)
 
 
 def validate_dialect(
@@ -39,14 +48,63 @@ def validate_dialect(
     Return dialect-specific diagnostics for *doc*.
     """
     diags: list[lsp.Diagnostic] = []
-
-    if not dialect.functions and not dialect.allowed_flag_types:
-        return diags  # standard-jsgf dialect — nothing extra to check
-
     offsets = _line_offsets(doc.source)
 
-    # Check typed flags in tags
+    # ------------------------------------------------------------------ #
+    #  LHS flag detection — always run, regardless of dialect             #
+    # ------------------------------------------------------------------ #
+    # Collect the source offsets of all LHS flag blocks so RHS tag scanning
+    # can skip them (they have already been handled / rejected below).
+    lhs_flag_offsets: set[int] = set()
+
+    for rule_m in _LHS_RULE_RE.finditer(doc.source):
+        # Iterate over each individual {…} block within the captured run
+        for block_m in re.finditer(r'\{[^}]*\}', rule_m.group(1)):
+            abs_start = rule_m.start(1) + block_m.start()
+            lhs_flag_offsets.add(abs_start)
+
+            if not dialect.lhs_flags_enabled:
+                pos = _offset_to_position(abs_start, offsets)
+                diags.append(lsp.Diagnostic(
+                    range=_pos_to_range(pos, len(block_m.group(0))),
+                    message=(
+                        "LHS flags are not enabled for this dialect. "
+                        "Move the flag to the end of the rule body, or set "
+                        "\"allow_lhs\": true in jsgf-dialect.json."
+                    ),
+                    severity=lsp.DiagnosticSeverity.Error,
+                    source='jsgf-lsp',
+                ))
+            else:
+                # Validate the flag content with the same typed-flag rules
+                tag_content = block_m.group(0)[1:-1]  # strip { }
+                tag_start = abs_start + 1
+                for flag_m in _FLAG_RE.finditer(tag_content):
+                    key = flag_m.group(1)
+                    type_str = flag_m.group(2)
+                    value = flag_m.group(3).strip()
+                    errors = dialect.validate_flag(key, type_str, value)
+                    if errors:
+                        flag_offset = tag_start + flag_m.start()
+                        pos = _offset_to_position(flag_offset, offsets)
+                        diags.append(lsp.Diagnostic(
+                            range=_pos_to_range(pos, len(flag_m.group(0))),
+                            message=errors[0],
+                            severity=lsp.DiagnosticSeverity.Error,
+                            source='jsgf-lsp',
+                        ))
+
+    # Skip RHS tag and function checks for dialects with no typed extensions
+    if not dialect.functions and not dialect.allowed_flag_types:
+        return diags
+
+    # ------------------------------------------------------------------ #
+    #  RHS tag validation                                                  #
+    # ------------------------------------------------------------------ #
+    # Check typed flags in RHS tags (skip LHS blocks already handled above)
     for m in re.finditer(r'\{([^}]+)\}', doc.source):
+        if m.start() in lhs_flag_offsets:
+            continue
         tag_content = m.group(1)
         tag_start = m.start() + 1
         for flag_m in _FLAG_RE.finditer(tag_content):
