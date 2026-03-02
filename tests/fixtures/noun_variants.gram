@@ -1,0 +1,5 @@
+#JSGF V1.0;
+grammar com.example.nounvariants;
+
+public <noun> {number:enum=singular} = book | cat | table;
+public <noun> {number:enum=plural}   = books | cats | tables;

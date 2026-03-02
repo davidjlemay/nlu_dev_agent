@@ -100,3 +100,35 @@ public <broken> = <undefinedRef>;
     )
     assert len(diags) > 0
     assert coverage is None
+
+
+# ------------------------------------------------------------------ #
+#  Multi-variant coverage                                              #
+# ------------------------------------------------------------------ #
+
+def test_validate_coverage_multi_variant():
+    """Coverage unions across all LHS-flag variants of the same rule name."""
+    dialect = DialectRegistry.standard()
+    index = GrammarIndex(FIXTURES, dialect)
+    path = FIXTURES / 'noun_variants.gram'
+    index.update_file(path, path.read_text())
+    api = GrammarAgentAPI(index)
+
+    result = api.validate_coverage('noun', path, ['book', 'cats', 'elephant'])
+    assert 'book' in result.covered       # matches singular
+    assert 'cats' in result.covered       # matches plural
+    assert 'elephant' in result.uncovered  # matches neither
+    assert abs(result.coverage_ratio - 2 / 3) < 0.01
+
+
+def test_validate_coverage_pyjsgf_name_direct():
+    """Looking up by mangled pyjsgf name returns only that specific variant."""
+    dialect = DialectRegistry.standard()
+    index = GrammarIndex(FIXTURES, dialect)
+    path = FIXTURES / 'noun_variants.gram'
+    index.update_file(path, path.read_text())
+    api = GrammarAgentAPI(index)
+
+    result = api.validate_coverage('noun__number_singular', path, ['book', 'books'])
+    assert 'book' in result.covered       # singular matches
+    assert 'books' in result.uncovered    # plural form not in singular rule

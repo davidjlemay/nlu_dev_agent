@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.document import GrammarDocument
+from core.document import GrammarDocument, _mangle_name, _mangle_source
 from core.index import GrammarIndex
 from core.dialect import DialectRegistry
 
@@ -131,3 +131,121 @@ public <item> {number:enum=singular} = book | pen;
     # body_source is None when pyjsgf parsed successfully (grammar_object set)
     # verify the pyjsgf parse worked (LHS flag didn't break it)
     assert rule.grammar_object is not None
+
+
+# ------------------------------------------------------------------ #
+#  Rule name mangling                                                  #
+# ------------------------------------------------------------------ #
+
+def test_mangle_name_single_flag():
+    assert _mangle_name('noun', '{number:enum=singular}') == 'noun__number_singular'
+
+
+def test_mangle_name_no_flags():
+    assert _mangle_name('bare', '') == 'bare'
+
+
+def test_mangle_name_multi_flag_sorted():
+    # Keys must be sorted lexicographically: a < b
+    result = _mangle_name('x', '{b:bool=true} {a:enum=masc}')
+    assert result == 'x__a_masc__b_true'
+
+
+def test_mangle_source_rewrites_declaration_not_body():
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <noun> {number:enum=singular} = book;
+public <sentence> = <noun>;
+"""
+    mangled, pyjsgf_to_orig, _ = _mangle_source(source)
+    # Declaration is rewritten
+    assert '<noun__number_singular>' in mangled
+    # Body reference to <noun> in <sentence> is NOT rewritten
+    assert '<noun>' in mangled
+    # Mapping populated correctly
+    assert pyjsgf_to_orig.get('noun__number_singular') == 'noun'
+
+
+def test_same_name_variants_parse_successfully():
+    path = FIXTURES / 'noun_variants.gram'
+    doc = GrammarDocument.parse(path, path.read_text())
+    assert doc.parse_error is None
+
+
+def test_same_name_variants_pyjsgf_names():
+    path = FIXTURES / 'noun_variants.gram'
+    doc = GrammarDocument.parse(path, path.read_text())
+    pyjsgf_names = [r.pyjsgf_name for r in doc.rules]
+    assert 'noun__number_singular' in pyjsgf_names
+    assert 'noun__number_plural' in pyjsgf_names
+
+
+def test_same_name_variants_original_names_preserved():
+    path = FIXTURES / 'noun_variants.gram'
+    doc = GrammarDocument.parse(path, path.read_text())
+    for rule in doc.rules:
+        assert rule.name == 'noun'
+
+
+def test_same_name_variants_no_duplicate_diagnostic():
+    dialect = DialectRegistry.standard()
+    index = GrammarIndex(FIXTURES, dialect)
+    path = FIXTURES / 'noun_variants.gram'
+    index.update_file(path, path.read_text())
+    doc = index._documents[path]
+    diags = doc.get_diagnostics(index)
+    dup_diags = [d for d in diags if 'Duplicate' in d.message]
+    assert dup_diags == []
+
+
+def test_true_duplicate_still_detected():
+    """Same name + same flags → pyjsgf_name collision → diagnostic emitted."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <noun> {number:enum=singular} = book;
+public <noun> {number:enum=singular} = cat;
+"""
+    dialect = DialectRegistry.standard()
+    index = GrammarIndex(Path('/tmp'), dialect)
+    path = Path('/tmp/dup_test.gram')
+    index.update_file(path, source)
+    doc = index._documents[path]
+    diags = doc.get_diagnostics(index)
+    dup_diags = [d for d in diags if 'Duplicate' in d.message]
+    assert len(dup_diags) >= 1
+
+
+def test_pyjsgf_def_positions_per_variant():
+    path = FIXTURES / 'noun_variants.gram'
+    doc = GrammarDocument.parse(path, path.read_text())
+    pos_singular = doc.pyjsgf_def_positions.get('noun__number_singular')
+    pos_plural = doc.pyjsgf_def_positions.get('noun__number_plural')
+    assert pos_singular is not None
+    assert pos_plural is not None
+    assert pos_singular.line != pos_plural.line
+
+
+def test_get_rule_by_pyjsgf_name():
+    path = FIXTURES / 'noun_variants.gram'
+    doc = GrammarDocument.parse(path, path.read_text())
+    rule = doc.get_rule('noun__number_plural')
+    assert rule is not None
+    assert rule.name == 'noun'
+    assert rule.pyjsgf_name == 'noun__number_plural'
+
+
+def test_resilient_parse_sets_pyjsgf_name():
+    """When pyjsgf fails, the resilient path should still set pyjsgf_name."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <item> {number:enum=singular} = book | pen;
+INVALID JSGF SYNTAX !!!
+"""
+    doc = GrammarDocument.parse(Path('/tmp/resilient_pyjsgf_name.gram'), source)
+    # Resilient parse was used (source has invalid syntax after the rule)
+    rule = doc.get_rule('item')
+    assert rule is not None
+    assert rule.pyjsgf_name == 'item__number_singular'

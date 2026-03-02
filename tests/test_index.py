@@ -93,3 +93,39 @@ def test_remove_file():
     affected = index.remove_file(shared)
     assert shared not in index._documents
     assert 'com.example.shared' not in index._grammar_name_index
+
+
+# ------------------------------------------------------------------ #
+#  resolve_rules — multi-variant support                               #
+# ------------------------------------------------------------------ #
+
+def test_resolve_rules_all_variants():
+    dialect = DialectRegistry.standard()
+    index = GrammarIndex(FIXTURES, dialect)
+    path = FIXTURES / 'noun_variants.gram'
+    index.update_file(path, path.read_text())
+    locs = index.resolve_rules('noun', path)
+    assert len(locs) == 2
+    pyjsgf_names = {loc.rule.pyjsgf_name for loc in locs}
+    assert 'noun__number_singular' in pyjsgf_names
+    assert 'noun__number_plural' in pyjsgf_names
+
+
+def test_resolve_rules_pyjsgf_name_lookup():
+    dialect = DialectRegistry.standard()
+    index = GrammarIndex(FIXTURES, dialect)
+    path = FIXTURES / 'noun_variants.gram'
+    index.update_file(path, path.read_text())
+    locs = index.resolve_rules('noun__number_singular', path)
+    assert len(locs) == 1
+    assert locs[0].rule.pyjsgf_name == 'noun__number_singular'
+
+
+def test_resolve_rules_single_unflagged_rule():
+    dialect = DialectRegistry.standard()
+    index = GrammarIndex(FIXTURES, dialect)
+    shared = FIXTURES / 'shared.gram'
+    index.update_file(shared, shared.read_text())
+    locs = index.resolve_rules('cardinal', shared)
+    assert len(locs) == 1
+    assert locs[0].rule.name == 'cardinal'

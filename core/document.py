@@ -55,6 +55,79 @@ def _parse_grammar(source: str):
     return parse_grammar_string(_strip_dialect_tags(source))
 
 
+# Regex to extract key/type/value triples from a LHS flags string
+_FLAG_MANGLE_RE = re.compile(r'\{([^:}]+):([^=}]+)=([^}]+)\}')
+
+# Matches rule declarations that carry at least one LHS flag block
+_LHS_DECL_RE = re.compile(
+    r'(?P<pub>(?:public\s+)?)'
+    r'<(?P<rulename>[A-Za-z0-9_.$-]+)>'
+    r'(?P<flags>(?:\s*\{[^}]*\})+)'
+    r'(?P<eq>\s*=)'
+)
+
+
+def _safe_flag_val(v: str) -> str:
+    """Replace non-identifier chars in a flag value with underscores."""
+    return re.sub(r'[^A-Za-z0-9]', '_', v)
+
+
+def _mangle_name(base_name: str, flags_str: str) -> str:
+    """
+    Compute the pyjsgf-safe rule name by appending sorted flag key/value pairs.
+
+    ``noun`` + ``{number:enum=singular}`` → ``noun__number_singular``
+    ``x`` + ``{b:bool=true} {a:enum=masc}`` → ``x__a_masc__b_true``  (sorted)
+
+    Returns *base_name* unchanged if *flags_str* is empty or has no parseable flags.
+    """
+    if not flags_str or not flags_str.strip():
+        return base_name
+    flags: dict[str, str] = {}
+    for m in _FLAG_MANGLE_RE.finditer(flags_str):
+        key = m.group(1).strip()
+        val = _safe_flag_val(m.group(3).strip())
+        flags[key] = val
+    if not flags:
+        return base_name
+    suffix = '__'.join(f'{k}_{v}' for k, v in sorted(flags.items()))
+    return f'{base_name}__{suffix}'
+
+
+def _mangle_source(
+    source: str,
+) -> tuple[str, dict[str, str], dict[str, Position]]:
+    """
+    Rewrite each rule declaration that carries LHS flags so that pyjsgf sees a
+    unique, identifier-safe rule name.  Only the declaration name is rewritten;
+    references in rule bodies are left unchanged.
+
+    Returns:
+        mangled_source      — source with declaration names replaced
+        pyjsgf_to_original  — mangled_name → original_name
+        pyjsgf_to_position  — mangled_name → Position of '<' in *source*
+    """
+    pyjsgf_to_original: dict[str, str] = {}
+    pyjsgf_to_position: dict[str, Position] = {}
+    offsets = _line_offsets(source)
+
+    def replacer(m: re.Match) -> str:
+        original = m.group('rulename')
+        flags_str = m.group('flags')
+        mangled = _mangle_name(original, flags_str)
+        if mangled != original:
+            pyjsgf_to_original[mangled] = original
+            angle_offset = m.start('rulename') - 1  # position of '<'
+            pyjsgf_to_position[mangled] = offset_to_position(angle_offset, offsets)
+        pub = m.group('pub')
+        flags = m.group('flags')
+        eq = m.group('eq')
+        return f'{pub}<{mangled}>{flags}{eq}'
+
+    mangled_source = _LHS_DECL_RE.sub(replacer, source)
+    return mangled_source, pyjsgf_to_original, pyjsgf_to_position
+
+
 @dataclass
 class RuleInfo:
     """Lightweight record of a discovered rule (even from resilient tokeniser)."""
@@ -62,6 +135,11 @@ class RuleInfo:
     visible: bool
     body_source: str | None      # None if the rule body failed to parse
     grammar_object: object | None  # pyjsgf Rule, if parsed successfully
+    pyjsgf_name: str = ''         # mangled pyjsgf name; defaults to name
+
+    def __post_init__(self):
+        if not self.pyjsgf_name:
+            self.pyjsgf_name = self.name
 
 
 @dataclass
@@ -88,6 +166,8 @@ class GrammarDocument:
     def_positions: dict[str, Position]
     # The parsed pyjsgf Grammar object (None if parse failed)
     pyjsgf_grammar: object | None = None
+    # Positions of rule definitions keyed by pyjsgf_name (mangled for flagged rules)
+    pyjsgf_def_positions: dict[str, Position] = field(default_factory=dict)
 
     # ------------------------------------------------------------------ #
     #  Construction                                                        #
@@ -103,17 +183,27 @@ class GrammarDocument:
         rules: list[RuleInfo] = []
         imports: list[ImportInfo] = []
 
+        # Mangle rule names for LHS flag variants so pyjsgf sees unique names
+        mangled_source, pyjsgf_to_original, pyjsgf_to_pos = _mangle_source(source)
+
+        # pyjsgf_def_positions: unflagged rules keep name == pyjsgf_name,
+        # flagged variants get their per-variant positions from _mangle_source
+        pyjsgf_def_positions = dict(def_positions)
+        pyjsgf_def_positions.update(pyjsgf_to_pos)
+
         pyjsgf_grammar = None
         try:
-            g = _parse_grammar(source)
+            g = _parse_grammar(mangled_source)
             grammar_name = g.name
             pyjsgf_grammar = g
             for rule in g.rules:
+                original_name = pyjsgf_to_original.get(rule.name, rule.name)
                 rules.append(RuleInfo(
-                    name=rule.name,
+                    name=original_name,
                     visible=rule.visible,
                     body_source=None,
                     grammar_object=rule,
+                    pyjsgf_name=rule.name,
                 ))
             for imp in g.imports:
                 imports.append(ImportInfo(
@@ -138,6 +228,7 @@ class GrammarDocument:
             ref_positions=ref_positions,
             def_positions=def_positions,
             pyjsgf_grammar=pyjsgf_grammar,
+            pyjsgf_def_positions=pyjsgf_def_positions,
         )
 
     # ------------------------------------------------------------------ #
@@ -156,11 +247,13 @@ class GrammarDocument:
                 source='jsgf-lsp',
             ))
 
-        # Check for duplicate rule names within this file
+        # Check for duplicate rule names within this file.
+        # Two rules are duplicates only if they share the same pyjsgf_name
+        # (i.e. same base name AND same LHS flags combination).
         seen: dict[str, str] = {}
         for rule in self.rules:
-            if rule.name in seen:
-                rng = self._rule_def_range(rule.name)
+            if rule.pyjsgf_name in seen:
+                rng = self._rule_def_range(rule)
                 diags.append(lsp.Diagnostic(
                     range=rng,
                     message=f"Duplicate rule definition: <{rule.name}>",
@@ -168,7 +261,7 @@ class GrammarDocument:
                     source='jsgf-lsp',
                 ))
             else:
-                seen[rule.name] = rule.name
+                seen[rule.pyjsgf_name] = rule.name
 
         # Check each rule's body for undefined rule references
         for rule in self.rules:
@@ -207,13 +300,13 @@ class GrammarDocument:
 
     def get_rule(self, name: str) -> RuleInfo | None:
         for r in self.rules:
-            if r.name == name:
+            if r.name == name or r.pyjsgf_name == name:
                 return r
         return None
 
-    def _rule_def_range(self, name: str) -> lsp.Range:
-        pos = self.def_positions.get(name, Position(0, 0))
-        return _pos_to_range(pos, len(name))
+    def _rule_def_range(self, rule: RuleInfo) -> lsp.Range:
+        pos = self.pyjsgf_def_positions.get(rule.pyjsgf_name, Position(0, 0))
+        return _pos_to_range(pos, len(rule.name))
 
 
 # ------------------------------------------------------------------ #
@@ -297,16 +390,19 @@ def _resilient_parse(
 
     # Find rule definitions: optional 'public' <name> [lhs-flags] = ... ;
     for m in re.finditer(
-        r'(public\s+)?<([A-Za-z0-9_.$-]+)>(?:\s*\{[^}]*\})*\s*=([^;]+);', source, re.DOTALL
+        r'(public\s+)?<([A-Za-z0-9_.$-]+)>((?:\s*\{[^}]*\})*)\s*=([^;]+);', source, re.DOTALL
     ):
         visible = bool(m.group(1))
         name = m.group(2)
-        body = m.group(3).strip()
+        flags_str = m.group(3) or ''
+        body = m.group(4).strip()
+        pyjsgf_nm = _mangle_name(name, flags_str)
         rules.append(RuleInfo(
             name=name,
             visible=visible,
             body_source=body,
             grammar_object=None,
+            pyjsgf_name=pyjsgf_nm,
         ))
 
     return rules, imports

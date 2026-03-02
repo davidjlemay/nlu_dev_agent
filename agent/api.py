@@ -117,18 +117,30 @@ class GrammarAgentAPI:
         from_file: Path,
         utterances: list[str],
     ) -> CoverageResult:
-        """Check which *utterances* are matched by *rule_name*."""
-        loc = self.index.resolve_rule(rule_name, from_file)
-        if loc is None or loc.rule.grammar_object is None:
-            return CoverageResult([], utterances, 0.0)
-        rule_obj = loc.rule.grammar_object
+        """Check which *utterances* are matched by *rule_name*.
+
+        Unions coverage across all variants (rules with the same base name but
+        different LHS flags) so that an utterance is covered if any variant
+        matches it.
+        """
+        def _try_match(rule_obj, u: str) -> bool:
+            try:
+                return rule_obj.matches(u)
+            except RecursionError:
+                return False
+
+        locs = self.index.resolve_rules(rule_name, from_file)
+        rule_objs = [loc.rule.grammar_object for loc in locs if loc.rule.grammar_object]
+        if not rule_objs:
+            loc = self.index.resolve_rule(rule_name, from_file)
+            if not loc or not loc.rule.grammar_object:
+                return CoverageResult([], utterances, 0.0)
+            rule_objs = [loc.rule.grammar_object]
+
         covered: list[str] = []
         uncovered: list[str] = []
         for u in utterances:
-            try:
-                matched = rule_obj.matches(u)
-            except RecursionError:
-                matched = False
+            matched = any(_try_match(rule_obj, u) for rule_obj in rule_objs)
             (covered if matched else uncovered).append(u)
         ratio = len(covered) / len(utterances) if utterances else 0.0
         return CoverageResult(covered, uncovered, ratio)

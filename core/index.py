@@ -119,6 +119,28 @@ class GrammarIndex:
 
         return None
 
+    def resolve_rules(self, name: str, from_file: Path) -> list[RuleLocation]:
+        """
+        Return all variants of *name* visible from *from_file* (local then imported).
+
+        A variant is any rule whose original name or pyjsgf_name equals *name*,
+        so both ``'noun'`` and ``'noun__number_singular'`` work as lookup keys.
+        """
+        results: list[RuleLocation] = []
+        doc = self._documents.get(from_file)
+        if doc:
+            for rule in doc.rules:
+                if rule.name == name or rule.pyjsgf_name == name:
+                    results.append(RuleLocation(file=from_file, rule=rule))
+        if not results:
+            for imp_path in self._imports.get(from_file, set()):
+                imp_doc = self._documents.get(imp_path)
+                if imp_doc:
+                    for rule in imp_doc.rules:
+                        if (rule.name == name or rule.pyjsgf_name == name) and rule.visible:
+                            results.append(RuleLocation(file=imp_path, rule=rule))
+        return results
+
     def resolve_import(self, imp: ImportInfo, from_file: Path) -> Path | None:
         """
         Return the path of the grammar that satisfies *imp*, or None.
