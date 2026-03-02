@@ -57,13 +57,84 @@ public <myIntent> = expansion;   // public rule (referenceable from other files)
 
 The engine supports typed flags, custom functions, and is configured in `jsgf-dialect.json`.
 
-### Typed flags in tags
+### Typed flags in tags (RHS)
 ```jsgf
 <transfer> = transfer <amount> {intent:string=transfer_funds, requires_auth:bool=true};
 <rate>     = <cardinal> percent {slot:string=rate, min_conf:float=0.85};
 <choice>   = <option> {intent:string=select, tier:enum=GOLD|SILVER|BRONZE};
 ```
 Supported types: `string`, `int`, `float`, `bool`, `enum`
+
+### LHS flags and agreement variants
+
+LHS flags attach morphological or categorical metadata to rule **declarations**.
+The engine supports **multiple rules with the same name** differentiated by LHS
+flags — it selects the correct variant at runtime based on agreement constraints.
+
+**Always prefer same-name rules with differing LHS flags** over encoding the
+flag value into the rule name. This keeps rule references simple and lets the
+engine handle variant selection.
+
+```jsgf
+// ✅ PREFERRED — same name, flags distinguish variants
+<quel> {gender:enum=masculine} = quel;
+<quel> {gender:enum=feminine}  = quelle;
+
+<mon> {gender:enum=masculine} = mon;
+<mon> {gender:enum=feminine}  = ma;
+
+<bal> {gender:enum=masculine} = solde | montant;
+<bal> {gender:enum=feminine}  = balance;
+
+// References use the bare name — the engine resolves agreement
+public <check_balance> {gender:enum=masculine} =
+    <quel> est <mon> <bal> {intent:string=check_balance};
+public <check_balance> {gender:enum=feminine} =
+    <quel> est <mon> <bal> {intent:string=check_balance};
+```
+
+```jsgf
+// ❌ AVOID — flag values baked into rule names
+<quel_masc> {gender:enum=masculine} = quel;
+<quel_fem>  {gender:enum=feminine}  = quelle;
+
+public <check_balance_masc> {gender:enum=masculine} =
+    <quel_masc> est <mon_masc> <bal_masc> {intent:string=check_balance};
+```
+
+#### Bare vs flagged body references
+
+- **Bare reference** `<quel>` — the engine selects the correct variant at
+  runtime based on agreement context. In coverage testing, bare references
+  match **any** variant (via synthetic union).
+- **Flagged reference** `<quel> {gender:enum=masculine}` — pins the
+  reference to a **specific** variant. Use this when you need to enforce
+  agreement explicitly in the grammar body rather than deferring to the engine.
+
+```jsgf
+// Bare — engine resolves agreement automatically
+public <check_balance> {gender:enum=masculine} =
+    <quel> est <mon> <bal> {intent:string=check_balance};
+
+// Flagged — grammar author pins each reference explicitly
+public <check_balance> {gender:enum=masculine} =
+    <quel> {gender:enum=masculine} est <mon> {gender:enum=masculine}
+    <bal> {gender:enum=masculine} {intent:string=check_balance};
+```
+
+Both forms are valid. Prefer **bare references** when the engine's agreement
+resolution is sufficient; use **flagged references** when you need to mix
+variants or override default agreement within a single rule.
+
+The engine internally mangles names for uniqueness
+(`<quel>` + `{gender:enum=masculine}` → `quel__gender_masculine`), but grammar
+authors should never need to reference the mangled form.
+
+LHS flags work with any flag type — common uses include:
+- `{gender:enum=masculine|feminine}` — grammatical gender
+- `{number:enum=singular|plural}` — grammatical number
+- `{tense:enum=present|past}` — verb tense
+- `{formality:enum=formal|informal}` — register
 
 ### Custom functions
 ```jsgf

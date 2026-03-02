@@ -47,7 +47,11 @@ def _strip_dialect_tags(source: str) -> str:
     # Step 1: remove LHS flag blocks (one or more {…} between > and =)
     source = re.sub(r'(?<=>)(\s*\{[^}]*\})+(?=\s*=)', '', source)
     # Step 2: replace remaining RHS dialect tag content with a plain token
-    return re.sub(r'\{[^}]*\}', '{tag}', source)
+    source = re.sub(r'\{[^}]*\}', '{tag}', source)
+    # Step 3: replace $function(...) calls with a placeholder literal so
+    # pyjsgf can parse rules that use dialect functions.
+    source = re.sub(r'\$[A-Za-z_][A-Za-z0-9_]*\([^)]*\)', 'PLACEHOLDER', source)
+    return source
 
 
 def _parse_grammar(source: str):
@@ -125,6 +129,67 @@ def _mangle_source(
         return f'{pub}<{mangled}>{flags}{eq}'
 
     mangled_source = _LHS_DECL_RE.sub(replacer, source)
+
+    # Build the full set of known mangled names for flagged-reference resolution.
+    _all_mangled: set[str] = set(pyjsgf_to_original.keys())
+
+    # Resolve *flagged body references*: <quel> {gender:enum=masculine} in a rule
+    # body should resolve to <quel__gender_masculine>.  The inline flags are
+    # consumed (removed) so pyjsgf never sees them.
+    _FLAGGED_REF_RE = re.compile(
+        r'<([A-Za-z0-9_.$-]+)>'        # rule reference
+        r'((?:\s*\{[^}]*\})+)'         # one or more flag blocks
+        r'(?!\s*=)'                     # NOT followed by '=' (that's a declaration)
+    )
+
+    def _flagged_ref_replacer(m: re.Match) -> str:
+        ref_name = m.group(1)
+        flags_str = m.group(2)
+        candidate = _mangle_name(ref_name, flags_str)
+        if candidate in _all_mangled:
+            return f'<{candidate}>'
+        # If the mangled name isn't a known declaration, leave it unchanged
+        # (will be caught as an undefined-ref diagnostic later).
+        return m.group(0)
+
+    mangled_source = _FLAGGED_REF_RE.sub(_flagged_ref_replacer, mangled_source)
+
+    # Post-pass: resolve bare (unflagged) body references to flagged rules.
+    original_to_mangled: dict[str, list[str]] = {}
+    for mangled_nm, orig_nm in pyjsgf_to_original.items():
+        original_to_mangled.setdefault(orig_nm, []).append(mangled_nm)
+
+    unambiguous = {
+        orig: mangled_list[0]
+        for orig, mangled_list in original_to_mangled.items()
+        if len(mangled_list) == 1
+    }
+    ambiguous = {
+        orig: mangled_list
+        for orig, mangled_list in original_to_mangled.items()
+        if len(mangled_list) > 1
+    }
+
+    if unambiguous:
+        def _ref_replacer(m: re.Match) -> str:
+            name = m.group(1)
+            if name in unambiguous:
+                return f'<{unambiguous[name]}>'
+            return m.group(0)
+        # Only replace references (not declarations — those are already mangled).
+        mangled_source = re.sub(r'<([A-Za-z0-9_.$-]+)>(?!\s*(?:\{[^}]*\}\s*)*=)',
+                                _ref_replacer, mangled_source)
+
+    # For ambiguous names (multiple flag variants), append synthetic union rules
+    # so that pyjsgf can resolve bare references like <quel> to any variant.
+    if ambiguous:
+        union_rules: list[str] = []
+        for orig, mangled_list in sorted(ambiguous.items()):
+            alts = ' | '.join(f'<{m}>' for m in sorted(mangled_list))
+            union_rules.append(f'<{orig}> = {alts};')
+        mangled_source += '\n// [synthetic union rules for pyjsgf]\n'
+        mangled_source += '\n'.join(union_rules) + '\n'
+
     return mangled_source, pyjsgf_to_original, pyjsgf_to_position
 
 
@@ -192,12 +257,29 @@ class GrammarDocument:
         pyjsgf_def_positions.update(pyjsgf_to_pos)
 
         pyjsgf_grammar = None
+        # Names that have synthetic union rules — these should not appear in
+        # the public rules list (they exist only to let pyjsgf resolve refs).
+        _synthetic_names = set(ambiguous) if 'ambiguous' in dir() else set()
+        # Safely capture from _mangle_source's post-pass
+        _synthetic_names = {
+            orig for orig, mangled_list in original_to_mangled.items()
+            if len(mangled_list) > 1
+        } if (original_to_mangled := {}) or True else set()
+        # Re-derive from pyjsgf_to_original
+        _orig_to_mangled: dict[str, list[str]] = {}
+        for mn, on in pyjsgf_to_original.items():
+            _orig_to_mangled.setdefault(on, []).append(mn)
+        _synthetic_names = {on for on, ml in _orig_to_mangled.items() if len(ml) > 1}
+
         try:
             g = _parse_grammar(mangled_source)
             grammar_name = g.name
             pyjsgf_grammar = g
             for rule in g.rules:
                 original_name = pyjsgf_to_original.get(rule.name, rule.name)
+                # Skip synthetic union rules added by _mangle_source
+                if rule.name in _synthetic_names and rule.name not in pyjsgf_to_original:
+                    continue
                 rules.append(RuleInfo(
                     name=original_name,
                     visible=rule.visible,

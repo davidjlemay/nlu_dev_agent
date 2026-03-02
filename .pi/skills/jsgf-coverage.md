@@ -1,3 +1,8 @@
+---
+name: jsgf-coverage
+description: Check utterance coverage for a JSGF rule from the command line.
+---
+
 # jsgf-coverage
 
 Check utterance coverage for a JSGF rule from the command line.

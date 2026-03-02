@@ -161,10 +161,61 @@ public <sentence> = <noun>;
     mangled, pyjsgf_to_orig, _ = _mangle_source(source)
     # Declaration is rewritten
     assert '<noun__number_singular>' in mangled
-    # Body reference to <noun> in <sentence> is NOT rewritten
-    assert '<noun>' in mangled
+    # Body reference to <noun> in <sentence> IS rewritten (unambiguous: one variant)
+    assert '<noun__number_singular>' in mangled.split('<sentence>')[1]
     # Mapping populated correctly
     assert pyjsgf_to_orig.get('noun__number_singular') == 'noun'
+
+
+def test_mangle_source_ambiguous_reference_not_rewritten():
+    """When a rule has multiple flagged variants, body references stay unchanged."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <noun> {number:enum=singular} = book;
+public <noun> {number:enum=plural} = books;
+public <sentence> = <noun>;
+"""
+    mangled, pyjsgf_to_orig, _ = _mangle_source(source)
+    assert '<noun__number_singular>' in mangled
+    assert '<noun__number_plural>' in mangled
+    # Body reference is ambiguous (two variants) — NOT rewritten
+    body = mangled.split('<sentence>')[1]
+    assert '<noun>' in body
+
+
+def test_mangle_source_flagged_body_reference():
+    """Flagged body references like <noun> {number:enum=singular} resolve to the mangled name."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+<noun> {number:enum=singular} = book;
+<noun> {number:enum=plural}   = books;
+public <sentence> = I read <noun> {number:enum=plural};
+"""
+    mangled, pyjsgf_to_orig, _ = _mangle_source(source)
+    # The flagged reference should resolve to the plural variant
+    body = mangled.split('<sentence>')[1]
+    assert '<noun__number_plural>' in body
+    # The inline flags should be consumed (not left in source)
+    assert '{number:enum=plural}' not in body.split('=', 1)[1]
+
+
+def test_mangle_source_flagged_ref_unknown_variant_ambiguous():
+    """Flagged body reference to a non-existent variant stays as bare name
+    (resolved by synthetic union) when the base name is ambiguous."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+<noun> {number:enum=singular} = book;
+<noun> {number:enum=plural}   = books;
+public <sentence> = I read <noun> {number:enum=dual};
+"""
+    mangled, _, _ = _mangle_source(source)
+    body = mangled.split('<sentence>')[1]
+    # 'dual' variant doesn't exist — flagged ref pass leaves it unchanged,
+    # bare <noun> resolves to synthetic union of singular|plural
+    assert '<noun>' in body
 
 
 def test_same_name_variants_parse_successfully():

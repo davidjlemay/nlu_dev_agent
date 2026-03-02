@@ -1,3 +1,8 @@
+---
+name: jsgf-validate
+description: Validate a JSGF grammar file from the command line (without the interactive agent).
+---
+
 # jsgf-validate
 
 Validate a JSGF grammar file from the command line (without the interactive agent).

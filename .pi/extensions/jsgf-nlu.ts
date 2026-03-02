@@ -2,7 +2,7 @@
  * jsgf-nlu — pi coding agent extension for JSGF grammar development
  *
  * Registers three domain tools and one slash command that wire the agent
- * to the Python core layer (via CLI skills in skills/jsgf-*/):
+ * to the Python core layer (via CLI skills in skills/jsgf-*):
  *
  *   jsgf_validate    — validate a .gram file; returns structured diagnostics
  *   jsgf_coverage    — check utterance coverage for a named rule
