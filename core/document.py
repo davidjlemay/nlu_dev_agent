@@ -44,6 +44,13 @@ def _strip_dialect_tags(source: str) -> str:
 
     Dialect-specific validation is done separately by core/validator.py.
     """
+    # Step 0: strip [args] from inside angle brackets (parameterized refs/decls)
+    source = re.sub(r'(<[A-Za-z0-9_.$-]+)\[[^\]]*\]>', r'\1>', source)
+    # Step 0b: replace bare $param refs (not function calls) with a literal
+    # so pyjsgf can parse rule bodies that use substitution parameters.
+    # \b anchors to the end of the identifier so partial prefixes don't match
+    # when the full name IS followed by '(' (e.g. $normalise(...) must not match).
+    source = re.sub(r'\$[A-Za-z_][A-Za-z0-9_]*\b(?!\()', 'PARAM', source)
     # Step 1: remove LHS flag blocks (one or more {…} between > and =)
     source = re.sub(r'(?<=>)(\s*\{[^}]*\})+(?=\s*=)', '', source)
     # Step 2: replace remaining RHS dialect tag content with a plain token
@@ -62,10 +69,14 @@ def _parse_grammar(source: str):
 # Regex to extract key/type/value triples from a LHS flags string
 _FLAG_MANGLE_RE = re.compile(r'\{([^:}]+):([^=}]+)=([^}]+)\}')
 
-# Matches rule declarations that carry at least one LHS flag block
+# Matches rule declarations that carry at least one LHS flag block.
+# Optional [$param1, $param2] after the rule name is captured and dropped
+# from pyjsgf output (params are irrelevant to pyjsgf).
 _LHS_DECL_RE = re.compile(
     r'(?P<pub>(?:public\s+)?)'
-    r'<(?P<rulename>[A-Za-z0-9_.$-]+)>'
+    r'<(?P<rulename>[A-Za-z0-9_.$-]+)'
+    r'(?P<params>\[[^\]]*\])?'          # optional [$param1, $param2]
+    r'>'
     r'(?P<flags>(?:\s*\{[^}]*\})+)'
     r'(?P<eq>\s*=)'
 )
@@ -74,6 +85,18 @@ _LHS_DECL_RE = re.compile(
 def _safe_flag_val(v: str) -> str:
     """Replace non-identifier chars in a flag value with underscores."""
     return re.sub(r'[^A-Za-z0-9]', '_', v)
+
+
+def _parse_params(params_str: str) -> list[str]:
+    """Parse a params block like '[$from, $to]' into ['from', 'to'].
+
+    Returns an empty list if *params_str* is empty or contains no items.
+    The leading '$' is stripped from each param name.
+    """
+    s = params_str.strip('[] \t')
+    if not s:
+        return []
+    return [p.strip().lstrip('$') for p in s.split(',') if p.strip()]
 
 
 def _mangle_name(base_name: str, flags_str: str) -> str:
@@ -135,9 +158,12 @@ def _mangle_source(
 
     # Resolve *flagged body references*: <quel> {gender:enum=masculine} in a rule
     # body should resolve to <quel__gender_masculine>.  The inline flags are
-    # consumed (removed) so pyjsgf never sees them.
+    # consumed (removed) so pyjsgf never sees them.  Optional [args] at the
+    # call site (parameterized rules) are also consumed.
     _FLAGGED_REF_RE = re.compile(
-        r'<([A-Za-z0-9_.$-]+)>'        # rule reference
+        r'<([A-Za-z0-9_.$-]+)'         # base rule name
+        r'(?:\[[^\]]*\])?'             # optional [args] (consumed)
+        r'>'
         r'((?:\s*\{[^}]*\})+)'         # one or more flag blocks
         r'(?!\s*=)'                     # NOT followed by '=' (that's a declaration)
     )
@@ -177,8 +203,10 @@ def _mangle_source(
                 return f'<{unambiguous[name]}>'
             return m.group(0)
         # Only replace references (not declarations — those are already mangled).
-        mangled_source = re.sub(r'<([A-Za-z0-9_.$-]+)>(?!\s*(?:\{[^}]*\}\s*)*=)',
-                                _ref_replacer, mangled_source)
+        # Also handles parameterized refs like <name[args]> — params are dropped.
+        mangled_source = re.sub(
+            r'<([A-Za-z0-9_.$-]+)(?:\[[^\]]*\])?>(?!\s*(?:\{[^}]*\}\s*)*=)',
+            _ref_replacer, mangled_source)
 
     # For ambiguous names (multiple flag variants), append synthetic union rules
     # so that pyjsgf can resolve bare references like <quel> to any variant.
@@ -201,6 +229,7 @@ class RuleInfo:
     body_source: str | None      # None if the rule body failed to parse
     grammar_object: object | None  # pyjsgf Rule, if parsed successfully
     pyjsgf_name: str = ''         # mangled pyjsgf name; defaults to name
+    params: list = field(default_factory=list)  # parameter names for parameterized rules
 
     def __post_init__(self):
         if not self.pyjsgf_name:
@@ -248,6 +277,17 @@ class GrammarDocument:
         rules: list[RuleInfo] = []
         imports: list[ImportInfo] = []
 
+        # Build params lookup from original source: base name → param list
+        # (same params used across all flag variants of a rule)
+        _PARAMS_SCAN_RE = re.compile(
+            r'(?:public\s+)?<([A-Za-z0-9_.$-]+)(\[[^\]]*\])?>(?:\s*\{[^}]*\})*\s*='
+        )
+        _name_to_params: dict[str, list[str]] = {}
+        for _pm in _PARAMS_SCAN_RE.finditer(source):
+            _nm = _pm.group(1)
+            if _nm not in _name_to_params:
+                _name_to_params[_nm] = _parse_params(_pm.group(2) or '')
+
         # Mangle rule names for LHS flag variants so pyjsgf sees unique names
         mangled_source, pyjsgf_to_original, pyjsgf_to_pos = _mangle_source(source)
 
@@ -286,6 +326,7 @@ class GrammarDocument:
                     body_source=None,
                     grammar_object=rule,
                     pyjsgf_name=rule.name,
+                    params=_name_to_params.get(original_name, []),
                 ))
             for imp in g.imports:
                 imports.append(ImportInfo(
@@ -470,21 +511,25 @@ def _resilient_parse(
             position=def_positions.get(full_name, Position(0, 0)),
         ))
 
-    # Find rule definitions: optional 'public' <name> [lhs-flags] = ... ;
+    # Find rule definitions: optional 'public' <name[params]> [lhs-flags] = ... ;
     for m in re.finditer(
-        r'(public\s+)?<([A-Za-z0-9_.$-]+)>((?:\s*\{[^}]*\})*)\s*=([^;]+);', source, re.DOTALL
+        r'(public\s+)?<([A-Za-z0-9_.$-]+)(\[[^\]]*\])?>((?:\s*\{[^}]*\})*)\s*=([^;]+);',
+        source, re.DOTALL
     ):
         visible = bool(m.group(1))
         name = m.group(2)
-        flags_str = m.group(3) or ''
-        body = m.group(4).strip()
+        params_str = m.group(3) or ''
+        flags_str = m.group(4) or ''
+        body = m.group(5).strip()
         pyjsgf_nm = _mangle_name(name, flags_str)
+        params = _parse_params(params_str)
         rules.append(RuleInfo(
             name=name,
             visible=visible,
             body_source=body,
             grammar_object=None,
             pyjsgf_name=pyjsgf_nm,
+            params=params,
         ))
 
     return rules, imports

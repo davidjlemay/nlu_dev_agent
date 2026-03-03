@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.document import GrammarDocument, _mangle_name, _mangle_source
+from core.document import GrammarDocument, _mangle_name, _mangle_source, _parse_params, _strip_dialect_tags
 from core.index import GrammarIndex
 from core.dialect import DialectRegistry
 
@@ -300,3 +300,170 @@ INVALID JSGF SYNTAX !!!
     rule = doc.get_rule('item')
     assert rule is not None
     assert rule.pyjsgf_name == 'item__number_singular'
+
+
+# ------------------------------------------------------------------ #
+#  Custom functions + LHS flags                                        #
+# ------------------------------------------------------------------ #
+
+def test_function_body_with_lhs_flag_parses_ok():
+    """Rule with LHS flag whose body uses a dialect function parses without error."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <price> {currency:enum=usd} = $normalise(<cardinal>, 'USD');
+public <cardinal> = one | two | three;
+"""
+    doc = GrammarDocument.parse(Path('/tmp/func_lhs.gram'), source)
+    assert doc.parse_error is None
+    rule = doc.get_rule('price')
+    assert rule is not None
+    assert rule.pyjsgf_name == 'price__currency_usd'
+
+
+def test_flagged_ref_to_function_bodied_rule():
+    """Flagged body reference to a function-bodied rule resolves to mangled name."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+<cost> {currency:enum=usd} = $normalise(<cardinal>, 'USD');
+<cost> {currency:enum=gbp} = $normalise(<cardinal>, 'GBP');
+public <cardinal> = one | two | three;
+public <buy> = pay <cost> {currency:enum=usd};
+"""
+    mangled, pyjsgf_to_orig, _ = _mangle_source(source)
+    body = mangled.split('<buy>')[1]
+    assert '<cost__currency_usd>' in body
+
+
+# ------------------------------------------------------------------ #
+#  Parameterized rules                                                 #
+# ------------------------------------------------------------------ #
+
+def test_parse_params_basic():
+    assert _parse_params('[$from, $to]') == ['from', 'to']
+
+
+def test_parse_params_empty():
+    assert _parse_params('') == []
+    assert _parse_params('[]') == []
+
+
+def test_parse_params_single():
+    assert _parse_params('[$x]') == ['x']
+
+
+def test_parameterized_decl_strips_params_for_pyjsgf():
+    """Unflagged parameterized declaration: pyjsgf sees plain <name>, no parse error."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <date_range[$start, $end]> = from $start to $end;
+"""
+    doc = GrammarDocument.parse(Path('/tmp/param_strip.gram'), source)
+    assert doc.parse_error is None
+    assert 'date_range' in doc.rule_names()
+
+
+def test_parameterized_with_lhs_flag_mangles_name():
+    """Parameterized decl with LHS flag: pyjsgf name is mangled, params dropped."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <transfer[$from, $to]> {currency:enum=usd} = transfer $from to $to in dollars;
+"""
+    doc = GrammarDocument.parse(Path('/tmp/param_mangle.gram'), source)
+    assert doc.parse_error is None
+    rule = doc.get_rule('transfer')
+    assert rule is not None
+    assert rule.pyjsgf_name == 'transfer__currency_usd'
+    # mangled source should NOT contain [$from, $to]
+    mangled, _, _ = _mangle_source(source)
+    assert '[$from, $to]' not in mangled
+
+
+def test_parameterized_flagged_ref_resolves():
+    """Parameterized call site with flags resolves to the mangled name."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <transfer[$from, $to]> {currency:enum=usd} = transfer $from to $to;
+public <savings> = savings account;
+public <chequing> = chequing account;
+public <my_transfer> = <transfer[<savings>, <chequing>]> {currency:enum=usd};
+"""
+    doc = GrammarDocument.parse(Path('/tmp/param_ref.gram'), source)
+    assert doc.parse_error is None
+    mangled, _, _ = _mangle_source(source)
+    body = mangled.split('<my_transfer>')[1]
+    assert '<transfer__currency_usd>' in body
+
+
+def test_parameterized_unflagged_call_site_strips_args():
+    """Unflagged parameterized call site: _strip_dialect_tags drops [args]."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <date_range[$start, $end]> = from $start to $end;
+public <departure> = departure date;
+public <return> = return date;
+public <booking> = <date_range[<departure>, <return>]>;
+"""
+    doc = GrammarDocument.parse(Path('/tmp/param_unflagged.gram'), source)
+    assert doc.parse_error is None
+    assert 'booking' in doc.rule_names()
+
+
+def test_dollar_param_in_body_becomes_placeholder():
+    """Bare $param in body becomes PARAM literal so pyjsgf can parse the rule."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <date_range[$start, $end]> = from $start to $end;
+"""
+    stripped = _strip_dialect_tags(source)
+    assert '$start' not in stripped
+    assert '$end' not in stripped
+    assert 'PARAM' in stripped
+
+
+def test_parameterized_fixture_parses_ok():
+    """The parameterized.gram fixture should parse without error."""
+    path = FIXTURES / 'parameterized.gram'
+    doc = GrammarDocument.parse(path, path.read_text())
+    assert doc.parse_error is None, f"Parse error: {doc.parse_error}"
+    names = doc.rule_names()
+    assert 'transfer' in names
+    assert 'date_range' in names
+    assert 'my_transfer' in names
+    assert 'booking' in names
+
+
+def test_parameterized_rule_params_populated():
+    """RuleInfo.params is populated for parameterized rules."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <transfer[$from, $to]> {currency:enum=usd} = transfer $from to $to;
+"""
+    doc = GrammarDocument.parse(Path('/tmp/param_params.gram'), source)
+    rule = doc.get_rule('transfer')
+    assert rule is not None
+    assert rule.params == ['from', 'to']
+
+
+def test_resilient_parse_parameterized_rule():
+    """Resilient parser recognises parameterized rule declarations."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <transfer[$from, $to]> {currency:enum=usd} = transfer $from to $to;
+INVALID SYNTAX !!!
+"""
+    doc = GrammarDocument.parse(Path('/tmp/param_resilient.gram'), source)
+    # Should have fallen back to resilient parse
+    assert doc.parse_error is not None
+    rule = doc.get_rule('transfer')
+    assert rule is not None
+    assert rule.pyjsgf_name == 'transfer__currency_usd'
+    assert rule.params == ['from', 'to']

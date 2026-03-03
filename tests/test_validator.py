@@ -150,3 +150,69 @@ def test_agreement_fixture_parses_four_rules():
     names = doc.rule_names()
     assert 'item_singular' in names
     assert 'verb_plural' in names
+
+
+# ------------------------------------------------------------------ #
+#  Parameterized rule arity checks                                     #
+# ------------------------------------------------------------------ #
+
+def test_parameterized_arity_ok():
+    """Call site with correct arg count → no arity error."""
+    dialect = DialectRegistry.from_config(DIALECT_JSON)
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <transfer[$from, $to]> {currency:enum=usd} = transfer $from to $to;
+public <savings>  = savings account;
+public <chequing> = chequing account;
+public <my_transfer> = <transfer[<savings>, <chequing>]> {currency:enum=usd};
+"""
+    diags = _diags(source, dialect)
+    arity_errors = [d for d in diags if 'argument' in d.message]
+    assert arity_errors == [], f"Unexpected arity errors: {[d.message for d in arity_errors]}"
+
+
+def test_parameterized_arity_mismatch():
+    """Call site with wrong arg count → error diagnostic."""
+    dialect = DialectRegistry.from_config(DIALECT_JSON)
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <transfer[$from, $to]> {currency:enum=usd} = transfer $from to $to;
+public <savings>  = savings account;
+public <bad_call> = <transfer[<savings>]> {currency:enum=usd};
+"""
+    diags = _diags(source, dialect)
+    arity_errors = [d for d in diags if 'argument' in d.message and 'transfer' in d.message]
+    assert len(arity_errors) == 1
+    assert '2' in arity_errors[0].message   # expected 2
+    assert '1' in arity_errors[0].message   # got 1
+
+
+def test_parameterized_arity_unflagged_mismatch():
+    """Unflagged parameterized call site with wrong arg count → error."""
+    dialect = DialectRegistry.standard()
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <date_range[$start, $end]> = from $start to $end;
+public <dep> = departure;
+public <bad_booking> = <date_range[<dep>]>;
+"""
+    diags = _diags(source, dialect)
+    arity_errors = [d for d in diags if 'argument' in d.message and 'date_range' in d.message]
+    assert len(arity_errors) == 1
+
+
+def test_parameterized_fixture_no_arity_errors():
+    """The parameterized.gram fixture should have no arity errors."""
+    dialect = DialectRegistry.from_config(DIALECT_JSON)
+    path = FIXTURES / 'parameterized.gram'
+    index = GrammarIndex(FIXTURES, dialect)
+    index.update_file(path, path.read_text())
+    doc = index._documents[path]
+
+    from core.validator import validate_dialect
+    diags = validate_dialect(doc, dialect)
+    arity_errors = [d for d in diags if 'argument' in d.message]
+    assert arity_errors == [], f"Unexpected arity errors: {[d.message for d in arity_errors]}"

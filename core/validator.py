@@ -33,11 +33,28 @@ _FUNC_RE = re.compile(r'\$([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\)')
 
 # LHS flag block(s): one or more {…} between '>' and '=' on a rule declaration.
 # Captures the run of flag blocks (group 1) so individual blocks can be re-scanned.
+# Handles optional [params] inside the angle brackets.
 _LHS_RULE_RE = re.compile(
-    r'(?:public\s+)?<[A-Za-z0-9_.$-]+>'   # rule header
-    r'((?:\s*\{[^}]*\})+)'                 # one or more LHS flag blocks (captured)
-    r'\s*='                                # then =
+    r'(?:public\s+)?<[A-Za-z0-9_.$-]+(?:\[[^\]]*\])?>'  # rule header
+    r'((?:\s*\{[^}]*\})+)'                               # one or more LHS flag blocks
+    r'\s*='                                               # then =
 )
+
+# Parameterized rule declaration: <name[params]> optionally followed by LHS flags, then =
+_PARAM_DECL_RE = re.compile(
+    r'<([A-Za-z0-9_.$-]+)\[([^\]]*)\]>(?:\s*\{[^}]*\})*\s*='
+)
+
+# Parameterized rule call site: <name[args]> NOT followed by LHS flags then =
+_PARAM_CALL_RE = re.compile(
+    r'<([A-Za-z0-9_.$-]+)\[([^\]]*)\]>(?!\s*(?:\{[^}]*\}\s*)*=)'
+)
+
+
+def _count_items(items_str: str) -> int:
+    """Count comma-separated items; empty string → 0."""
+    s = items_str.strip()
+    return 0 if not s else len(s.split(','))
 
 
 def validate_dialect(
@@ -94,48 +111,77 @@ def validate_dialect(
                             source='jsgf-lsp',
                         ))
 
-    # Skip RHS tag and function checks for dialects with no typed extensions
-    if not dialect.functions and not dialect.allowed_flag_types:
-        return diags
+    # RHS tag and function checks only apply to dialects with typed extensions
+    if dialect.functions or dialect.allowed_flag_types:
+        # ---------------------------------------------------------------- #
+        #  RHS tag validation                                               #
+        # ---------------------------------------------------------------- #
+        # Check typed flags in RHS tags (skip LHS blocks already handled above)
+        for m in re.finditer(r'\{([^}]+)\}', doc.source):
+            if m.start() in lhs_flag_offsets:
+                continue
+            tag_content = m.group(1)
+            tag_start = m.start() + 1
+            for flag_m in _FLAG_RE.finditer(tag_content):
+                key = flag_m.group(1)
+                type_str = flag_m.group(2)
+                value = flag_m.group(3).strip()
+                errors = dialect.validate_flag(key, type_str, value)
+                if errors:
+                    flag_offset = tag_start + flag_m.start()
+                    pos = _offset_to_position(flag_offset, offsets)
+                    diags.append(lsp.Diagnostic(
+                        range=_pos_to_range(pos, len(flag_m.group(0))),
+                        message=errors[0],
+                        severity=lsp.DiagnosticSeverity.Error,
+                        source='jsgf-lsp',
+                    ))
 
-    # ------------------------------------------------------------------ #
-    #  RHS tag validation                                                  #
-    # ------------------------------------------------------------------ #
-    # Check typed flags in RHS tags (skip LHS blocks already handled above)
-    for m in re.finditer(r'\{([^}]+)\}', doc.source):
-        if m.start() in lhs_flag_offsets:
-            continue
-        tag_content = m.group(1)
-        tag_start = m.start() + 1
-        for flag_m in _FLAG_RE.finditer(tag_content):
-            key = flag_m.group(1)
-            type_str = flag_m.group(2)
-            value = flag_m.group(3).strip()
-            errors = dialect.validate_flag(key, type_str, value)
+        # Check custom function calls
+        for m in _FUNC_RE.finditer(doc.source):
+            fn_name = m.group(1)
+            args_str = m.group(2).strip()
+            arg_count = len(args_str.split(',')) if args_str else 0
+            errors = dialect.validate_function_call(fn_name, arg_count)
             if errors:
-                flag_offset = tag_start + flag_m.start()
-                pos = _offset_to_position(flag_offset, offsets)
+                pos = _offset_to_position(m.start(), offsets)
                 diags.append(lsp.Diagnostic(
-                    range=_pos_to_range(pos, len(flag_m.group(0))),
+                    range=_pos_to_range(pos, len(m.group(0))),
                     message=errors[0],
                     severity=lsp.DiagnosticSeverity.Error,
                     source='jsgf-lsp',
                 ))
 
-    # Check custom function calls
-    for m in _FUNC_RE.finditer(doc.source):
-        fn_name = m.group(1)
-        args_str = m.group(2).strip()
-        arg_count = len(args_str.split(',')) if args_str else 0
-        errors = dialect.validate_function_call(fn_name, arg_count)
-        if errors:
-            pos = _offset_to_position(m.start(), offsets)
-            diags.append(lsp.Diagnostic(
-                range=_pos_to_range(pos, len(m.group(0))),
-                message=errors[0],
-                severity=lsp.DiagnosticSeverity.Error,
-                source='jsgf-lsp',
-            ))
+    # ------------------------------------------------------------------ #
+    #  Parameterized rule arity checks                                     #
+    # ------------------------------------------------------------------ #
+    # Collect declared param counts per base rule name.
+    param_counts: dict[str, int] = {}
+    for m in _PARAM_DECL_RE.finditer(doc.source):
+        name = m.group(1)
+        count = _count_items(m.group(2))
+        if name not in param_counts:
+            param_counts[name] = count
+
+    # Check all call sites for arity mismatches.
+    if param_counts:
+        for m in _PARAM_CALL_RE.finditer(doc.source):
+            name = m.group(1)
+            if name not in param_counts:
+                continue
+            expected = param_counts[name]
+            actual = _count_items(m.group(2))
+            if actual != expected:
+                pos = _offset_to_position(m.start(), offsets)
+                diags.append(lsp.Diagnostic(
+                    range=_pos_to_range(pos, len(m.group(0))),
+                    message=(
+                        f"Parameterized rule <{name}> expects {expected} argument(s), "
+                        f"but {actual} were provided."
+                    ),
+                    severity=lsp.DiagnosticSeverity.Error,
+                    source='jsgf-lsp',
+                ))
 
     return diags
 
