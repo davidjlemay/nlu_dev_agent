@@ -15,6 +15,23 @@ from pathlib import Path
 
 
 @dataclass
+class DataSource:
+    name: str
+    type: str                                          # 'file' | 'inline' | 'command'
+    path: str | None = None                            # for type='file'
+    format: str = 'lines'                              # 'lines' | 'json'
+    values: list[str] = field(default_factory=list)    # for type='inline'
+    command: str | None = None                         # for type='command'
+    args: list[str] = field(default_factory=list)
+
+
+@dataclass
+class LazyLoadingConfig:
+    lookup_limit: int = 50
+    expansion_limit: int = 200
+
+
+@dataclass
 class ParameterSpec:
     name: str
     type: str          # 'rule_ref' | 'string' | 'int' | 'float' | 'bool' | 'enum'
@@ -39,6 +56,8 @@ class DialectRegistry:
     allow_multiline_tags: bool = False
     value_interpolation: bool = False
     lhs_flags_enabled: bool = False
+    lazy_loading: LazyLoadingConfig = field(default_factory=LazyLoadingConfig)
+    data_sources: dict[str, DataSource] = field(default_factory=dict)
 
     @classmethod
     def from_config(cls, path: Path) -> DialectRegistry:
@@ -61,6 +80,22 @@ class DialectRegistry:
             )
         flags = data.get('flags', {})
         tag_ext = data.get('tag_extensions', {})
+        ll_raw = data.get('lazy_loading', {})
+        lazy_loading = LazyLoadingConfig(
+            lookup_limit=ll_raw.get('lookup_limit', 50),
+            expansion_limit=ll_raw.get('expansion_limit', 200),
+        )
+        data_sources: dict[str, DataSource] = {}
+        for src_name, src_spec in data.get('data_sources', {}).items():
+            data_sources[src_name] = DataSource(
+                name=src_name,
+                type=src_spec.get('type', 'inline'),
+                path=src_spec.get('path'),
+                format=src_spec.get('format', 'lines'),
+                values=src_spec.get('values', []),
+                command=src_spec.get('command'),
+                args=src_spec.get('args', []),
+            )
         return cls(
             engine=data['engine'],
             functions=functions,
@@ -70,6 +105,8 @@ class DialectRegistry:
             allow_multiline_tags=tag_ext.get('allow_multiline', False),
             value_interpolation=tag_ext.get('value_interpolation', False),
             lhs_flags_enabled=flags.get('allow_lhs', False),
+            lazy_loading=lazy_loading,
+            data_sources=data_sources,
         )
 
     @classmethod

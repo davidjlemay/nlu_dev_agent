@@ -1,6 +1,14 @@
 {
   "engine": "proprietary-asr-v2",
   "version": "1.0",
+  "lazy_loading": {
+    "lookup_limit": 50,
+    "expansion_limit": 200
+  },
+  "data_sources": {
+    "bank_names": { "type": "file", "path": "data/bank_names.txt" },
+    "currencies":  { "type": "inline", "values": ["USD", "EUR", "GBP"] }
+  },
   "flags": {
     "allowed_types": ["string", "int", "float", "bool", "enum"],
     "reserved_keys": ["intent", "slot", "min_conf", "requires_auth", "log_level"],

@@ -28,36 +28,73 @@ from .patch import (
 if TYPE_CHECKING:
     from .index import GrammarIndex
 
-# Lazy import to avoid circular deps at module level
-def _strip_dialect_tags(source: str) -> str:
+# Regex that matches parameterized call sites: <name[args]> NOT followed by =
+# (declarations are handled separately by _mangle_source)
+_CALL_SITE_RE = re.compile(
+    r'<([A-Za-z0-9_.$-]+)\[([^\]]*)\]>(?!\s*(?:\{[^}]*\}\s*)*=)'
+)
+
+
+def _strip_dialect_tags(
+    source: str,
+    func_map: dict | None = None,
+    param_map: dict | None = None,
+    call_site_map: dict | None = None,
+) -> str:
     """
-    Prepare source for pyjsgf parsing by neutralising dialect extensions:
+    Prepare source for pyjsgf parsing by neutralising dialect extensions.
 
-    1. LHS flags — {…} blocks between > and = on rule declarations — are
-       removed entirely.  pyjsgf has no concept of rule-level metadata and
-       would reject even a sanitised {tag} token in that position.
+    Optional side-effect maps (populated in-place when provided):
+      func_map       — token ('PLHDR0') → (fn_name, [args])
+      param_map      — token ('PARM_x') → param_name ('x')
+      call_site_map  — rule_name → list of arg-lists from call sites
 
-    2. Remaining RHS tags (in expansion bodies) are replaced with {tag} so
-       that pyjsgf can build a correct AST for rule-ref and import analysis.
-       pyjsgf's tag regex only allows [\\w\\-\\'] so dialect content like
-       {intent:string=greet} must be stripped.
-
-    Dialect-specific validation is done separately by core/validator.py.
+    Steps:
+    -1. Capture parameterized call-site args into call_site_map.
+     0. Strip [args] from inside angle brackets (parameterized refs/decls).
+     0b.Replace bare $param refs with named PARM_<name> tokens.
+     1. Remove LHS flag blocks (one or more {…} between > and =).
+     2. Replace remaining RHS dialect tag content with {tag}.
+     3. Replace $function(...) calls with indexed PLHDR<n> tokens.
     """
+    # Step -1: capture call-site args before we strip them
+    if call_site_map is not None:
+        for m in _CALL_SITE_RE.finditer(source):
+            args = [a.strip() for a in m.group(2).split(',') if a.strip()]
+            call_site_map.setdefault(m.group(1), []).append(args)
+
     # Step 0: strip [args] from inside angle brackets (parameterized refs/decls)
     source = re.sub(r'(<[A-Za-z0-9_.$-]+)\[[^\]]*\]>', r'\1>', source)
-    # Step 0b: replace bare $param refs (not function calls) with a literal
-    # so pyjsgf can parse rule bodies that use substitution parameters.
+
+    # Step 0b: replace bare $param refs (not function calls) with named tokens
     # \b anchors to the end of the identifier so partial prefixes don't match
     # when the full name IS followed by '(' (e.g. $normalise(...) must not match).
-    source = re.sub(r'\$[A-Za-z_][A-Za-z0-9_]*\b(?!\()', 'PARAM', source)
+    def _param_replacer(m: re.Match) -> str:
+        param_name = m.group(1)
+        token = f'PARM_{param_name}'
+        if param_map is not None:
+            param_map[token] = param_name
+        return token
+
+    source = re.sub(r'\$([A-Za-z_][A-Za-z0-9_]*)\b(?!\()', _param_replacer, source)
+
     # Step 1: remove LHS flag blocks (one or more {…} between > and =)
     source = re.sub(r'(?<=>)(\s*\{[^}]*\})+(?=\s*=)', '', source)
     # Step 2: replace remaining RHS dialect tag content with a plain token
     source = re.sub(r'\{[^}]*\}', '{tag}', source)
-    # Step 3: replace $function(...) calls with a placeholder literal so
-    # pyjsgf can parse rules that use dialect functions.
-    source = re.sub(r'\$[A-Za-z_][A-Za-z0-9_]*\([^)]*\)', 'PLACEHOLDER', source)
+
+    # Step 3: replace $function(...) calls with indexed placeholder literals
+    _func_counter = [0]
+
+    def _func_replacer(m: re.Match) -> str:
+        token = f'PLHDR{_func_counter[0]}'
+        _func_counter[0] += 1
+        args = [a.strip().strip("'\"") for a in m.group(2).split(',') if a.strip()]
+        if func_map is not None:
+            func_map[token] = (m.group(1), args)
+        return token
+
+    source = re.sub(r'\$([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\)', _func_replacer, source)
     return source
 
 
@@ -262,6 +299,12 @@ class GrammarDocument:
     pyjsgf_grammar: object | None = None
     # Positions of rule definitions keyed by pyjsgf_name (mangled for flagged rules)
     pyjsgf_def_positions: dict[str, Position] = field(default_factory=dict)
+    # Lookup function placeholders: 'PLHDR0' → ('lookup', ['bank_names'])
+    func_placeholders: dict[str, tuple] = field(default_factory=dict)
+    # Param token map: 'PARM_from' → 'from'  (informational)
+    param_placeholder_map: dict[str, str] = field(default_factory=dict)
+    # Parameterized call sites: rule_name → list of arg-lists (before stripping)
+    param_call_sites: dict[str, list] = field(default_factory=dict)
 
     # ------------------------------------------------------------------ #
     #  Construction                                                        #
@@ -311,8 +354,20 @@ class GrammarDocument:
             _orig_to_mangled.setdefault(on, []).append(mn)
         _synthetic_names = {on for on, ml in _orig_to_mangled.items() if len(ml) > 1}
 
+        # Collect side-effect maps during dialect-tag stripping
+        func_placeholders: dict[str, tuple] = {}
+        param_placeholder_map: dict[str, str] = {}
+        param_call_sites: dict[str, list] = {}
+
         try:
-            g = _parse_grammar(mangled_source)
+            from jsgf.parser import parse_grammar_string
+            stripped = _strip_dialect_tags(
+                mangled_source,
+                func_map=func_placeholders,
+                param_map=param_placeholder_map,
+                call_site_map=param_call_sites,
+            )
+            g = parse_grammar_string(stripped)
             grammar_name = g.name
             pyjsgf_grammar = g
             for rule in g.rules:
@@ -352,6 +407,9 @@ class GrammarDocument:
             def_positions=def_positions,
             pyjsgf_grammar=pyjsgf_grammar,
             pyjsgf_def_positions=pyjsgf_def_positions,
+            func_placeholders=func_placeholders,
+            param_placeholder_map=param_placeholder_map,
+            param_call_sites=param_call_sites,
         )
 
     # ------------------------------------------------------------------ #

@@ -23,6 +23,7 @@ sys.path.insert(0, str(_HERE))
 
 from core.dialect import DialectRegistry
 from core.index import GrammarIndex
+from core.loader import DataLoader
 from agent.api import GrammarAgentAPI
 
 
@@ -58,8 +59,8 @@ def main():
     )
     index = GrammarIndex(workspace, dialect)
     index.index_workspace()
-
-    api = GrammarAgentAPI(index)
+    loader = DataLoader(dialect.data_sources, dialect.lazy_loading, workspace)
+    api = GrammarAgentAPI(index, loader=loader)
     ctx = api.get_generation_context(file_path, args.intent, examples)
 
     print(json.dumps(ctx.as_dict(), indent=2))

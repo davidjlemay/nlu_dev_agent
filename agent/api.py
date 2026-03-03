@@ -7,6 +7,7 @@ All methods work directly against the in-process GrammarIndex — no IPC.
 from __future__ import annotations
 
 import random
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -16,6 +17,7 @@ from lsprotocol import types as lsp
 from core.index import GrammarIndex, RuleLocation
 from core.document import GrammarDocument, _collect_rule_refs_from_expansion
 from core.dialect import CustomFunction
+from core.loader import DataLoader
 
 
 # ------------------------------------------------------------------ #
@@ -77,8 +79,9 @@ class GenerationContext:
 # ------------------------------------------------------------------ #
 
 class GrammarAgentAPI:
-    def __init__(self, index: GrammarIndex):
+    def __init__(self, index: GrammarIndex, loader: DataLoader | None = None):
         self.index = index
+        self.loader = loader
 
     # ---------------------------------------------------------------- #
     #  Expansion sampling                                               #
@@ -97,9 +100,13 @@ class GrammarAgentAPI:
         loc = self.index.resolve_rule(rule_name, from_file)
         if loc is None or loc.rule.grammar_object is None:
             return []
+        doc = self.index._documents.get(from_file)
+        limit = self.loader.expansion_limit if self.loader else 200
+        budget = [limit]
         try:
             expansions = list(_generate_expansions(
-                loc.rule.grammar_object.expansion, self.index, from_file
+                loc.rule.grammar_object.expansion, self.index, from_file,
+                loader=self.loader, doc=doc, budget=budget,
             ))
         except RecursionError:
             return []
@@ -130,15 +137,44 @@ class GrammarAgentAPI:
                 return False
 
         locs = self.index.resolve_rules(rule_name, from_file)
+        if not locs:
+            loc = self.index.resolve_rule(rule_name, from_file)
+            if not loc:
+                return CoverageResult([], utterances, 0.0)
+            locs = [loc]
+
+        # When the rule uses lookup placeholders and a loader is available,
+        # generate all expansions into a set and use set membership.
+        doc = self.index._documents.get(from_file)
+        use_expansion_path = (
+            self.loader is not None
+            and doc is not None
+            and bool(doc.func_placeholders)
+        )
+        if use_expansion_path:
+            loc = locs[0]
+            if loc.rule.grammar_object is not None:
+                budget = [self.loader.expansion_limit]  # type: ignore[union-attr]
+                try:
+                    expansion_set = set(_generate_expansions(
+                        loc.rule.grammar_object.expansion, self.index, from_file,
+                        loader=self.loader, doc=doc, budget=budget,
+                    ))
+                except RecursionError:
+                    expansion_set = set()
+                covered: list[str] = []
+                uncovered: list[str] = []
+                for u in utterances:
+                    (covered if u in expansion_set else uncovered).append(u)
+                ratio = len(covered) / len(utterances) if utterances else 0.0
+                return CoverageResult(covered, uncovered, ratio)
+
         rule_objs = [loc.rule.grammar_object for loc in locs if loc.rule.grammar_object]
         if not rule_objs:
-            loc = self.index.resolve_rule(rule_name, from_file)
-            if not loc or not loc.rule.grammar_object:
-                return CoverageResult([], utterances, 0.0)
-            rule_objs = [loc.rule.grammar_object]
+            return CoverageResult([], utterances, 0.0)
 
-        covered: list[str] = []
-        uncovered: list[str] = []
+        covered = []
+        uncovered = []
         for u in utterances:
             matched = any(_try_match(rule_obj, u) for rule_obj in rule_objs)
             (covered if matched else uncovered).append(u)
@@ -288,10 +324,24 @@ class GrammarAgentAPI:
 #  Expansion generator (bounded)                                       #
 # ------------------------------------------------------------------ #
 
-def _generate_expansions(expansion, index: GrammarIndex, from_file: Path, depth: int = 0):
+def _generate_expansions(
+    expansion,
+    index: GrammarIndex,
+    from_file: Path,
+    depth: int = 0,
+    loader: 'DataLoader | None' = None,
+    doc: 'GrammarDocument | None' = None,
+    bindings: 'dict[str, str] | None' = None,
+    budget: 'list[int] | None' = None,
+):
     """
     Recursively yield string expansions of a pyjsgf expansion.
     Bounded to depth 6 to avoid combinatorial explosion.
+
+    loader   — DataLoader for resolving $lookup() placeholders
+    doc      — GrammarDocument containing func_placeholders / param_call_sites
+    bindings — maps PARM_<name> token → resolved string value (for parameterized rules)
+    budget   — mutable [remaining] counter; stops yielding when reaches 0
     """
     from itertools import product
     from jsgf.expansions import (
@@ -303,38 +353,160 @@ def _generate_expansions(expansion, index: GrammarIndex, from_file: Path, depth:
     if depth > 6:
         return
 
+    def _budget_ok() -> bool:
+        return budget is None or budget[0] > 0
+
+    def _charge() -> None:
+        if budget is not None:
+            budget[0] -= 1
+
     if isinstance(expansion, Literal):
-        yield expansion.text
+        # pyjsgf lowercases all literal text
+        text = expansion.text
+
+        # 1. Param substitution — bindings keys are PARM_<name>, pyjsgf stores
+        #    them as parm_<name> (lowercase), so compare lowercase.
+        if bindings:
+            for token, value in bindings.items():
+                text = text.replace(token.lower(), value)
+
+        # 2. Lookup function placeholder expansion — PLHDR<n> tokens may be
+        #    embedded inside a longer literal like 'balance of plhdr0'.
+        if loader and doc:
+            _plhdr_re = re.compile(r'\bplhdr\d+\b')
+            plhdr_tokens = _plhdr_re.findall(text)
+            if plhdr_tokens:
+                parts = _plhdr_re.split(text)
+                # Build option lists: literal prefix/suffix interleaved with
+                # the loaded values for each PLHDR slot.
+                segment_options: list[list[str]] = [
+                    [parts[0]] if parts[0] else ['']
+                ]
+                for i, plhdr_lower in enumerate(plhdr_tokens):
+                    fn_info = doc.func_placeholders.get(plhdr_lower.upper())
+                    if fn_info:
+                        fn_name, fn_args = fn_info
+                        if fn_name == 'lookup' and fn_args:
+                            loaded = loader.load(fn_args[0])
+                            segment_options.append(loaded if loaded else [plhdr_lower])
+                        else:
+                            segment_options.append([plhdr_lower])
+                    else:
+                        segment_options.append([plhdr_lower])
+                    suffix = parts[i + 1] if i + 1 < len(parts) else ''
+                    segment_options.append([suffix] if suffix else [''])
+                for combo in product(*segment_options):
+                    if not _budget_ok():
+                        return
+                    result = ''.join(combo).strip()
+                    if result:
+                        _charge()
+                        yield result
+                return
+
+        yield text
+
     elif isinstance(expansion, AlternativeSet):
         for child in expansion.children:
-            yield from _generate_expansions(child, index, from_file, depth + 1)
+            yield from _generate_expansions(
+                child, index, from_file, depth + 1,
+                loader=loader, doc=doc, bindings=bindings, budget=budget,
+            )
     elif isinstance(expansion, Sequence):
         parts = [
-            list(_generate_expansions(c, index, from_file, depth + 1))
+            list(_generate_expansions(
+                c, index, from_file, depth + 1,
+                loader=loader, doc=doc, bindings=bindings, budget=budget,
+            ))
             for c in expansion.children
         ]
         for combo in product(*parts):
+            if not _budget_ok():
+                return
             joined = ' '.join(p for p in combo if p)
             if joined:
+                _charge()
                 yield joined
     elif isinstance(expansion, OptionalGrouping):
         yield ''
-        yield from _generate_expansions(expansion.child, index, from_file, depth + 1)
+        yield from _generate_expansions(
+            expansion.child, index, from_file, depth + 1,
+            loader=loader, doc=doc, bindings=bindings, budget=budget,
+        )
     elif isinstance(expansion, (KleeneStar, Repeat)):
         # Yield zero and one repetition to keep it bounded
         yield ''
-        yield from _generate_expansions(expansion.child, index, from_file, depth + 1)
+        yield from _generate_expansions(
+            expansion.child, index, from_file, depth + 1,
+            loader=loader, doc=doc, bindings=bindings, budget=budget,
+        )
     elif isinstance(expansion, NamedRuleRef):
         loc = index.resolve_rule(expansion.name, from_file)
         if loc and loc.rule.grammar_object is not None:
+            target_doc = doc
+            if loc.file != from_file:
+                target_doc = index._documents.get(loc.file)
+
+            # Parameterized rule expansion
+            if loc.rule.params and doc is not None:
+                call_sites = doc.param_call_sites.get(expansion.name, [])
+                if call_sites:
+                    for arg_list in call_sites:
+                        if not _budget_ok():
+                            return
+                        # Build bindings: param name → expanded string samples
+                        # Each arg is either a rule ref like '<savings>' or literal
+                        param_names = loc.rule.params
+                        # Pair args to params (truncate to shorter length)
+                        pairs = list(zip(param_names, arg_list))
+                        # Expand each arg value (strip angle brackets if it's a rule ref)
+                        arg_expansions: list[list[str]] = []
+                        for _pname, arg_val in pairs:
+                            arg_val = arg_val.strip()
+                            inner_ref = re.match(r'^<([A-Za-z0-9_.$-]+)>$', arg_val)
+                            if inner_ref:
+                                ref_loc = index.resolve_rule(inner_ref.group(1), from_file)
+                                if ref_loc and ref_loc.rule.grammar_object is not None:
+                                    samples = list(_generate_expansions(
+                                        ref_loc.rule.grammar_object.expansion,
+                                        index, from_file, depth + 1,
+                                        loader=loader, doc=doc, bindings=bindings, budget=budget,
+                                    ))
+                                    arg_expansions.append(samples or [arg_val])
+                                else:
+                                    arg_expansions.append([inner_ref.group(1)])
+                            else:
+                                arg_expansions.append([arg_val])
+                        # Cross product of arg expansions
+                        for arg_combo in product(*arg_expansions):
+                            if not _budget_ok():
+                                return
+                            new_bindings = dict(bindings or {})
+                            for (_pname, _), val in zip(pairs, arg_combo):
+                                new_bindings[f'PARM_{_pname}'] = val
+                            yield from _generate_expansions(
+                                loc.rule.grammar_object.expansion,
+                                index, loc.file, depth + 1,
+                                loader=loader, doc=target_doc,
+                                bindings=new_bindings, budget=budget,
+                            )
+                    return   # handled via call sites
+            # Non-parameterized (or no call site info): expand normally
             yield from _generate_expansions(
-                loc.rule.grammar_object.expansion, index, from_file, depth + 1
+                loc.rule.grammar_object.expansion, index, loc.file, depth + 1,
+                loader=loader, doc=target_doc, bindings=bindings, budget=budget,
             )
     elif isinstance(expansion, (NullRef, VoidRef)):
         return
     elif isinstance(expansion, SingleChildExpansion):
-        yield from _generate_expansions(expansion.child, index, from_file, depth + 1)
+        yield from _generate_expansions(
+            expansion.child, index, from_file, depth + 1,
+            loader=loader, doc=doc, bindings=bindings, budget=budget,
+        )
     else:
         # Fallback: try children
         for child in getattr(expansion, 'children', []):
-            yield from _generate_expansions(child, index, from_file, depth + 1)
+            yield from _generate_expansions(
+                child, index, from_file, depth + 1,
+                loader=loader, doc=doc, bindings=bindings, budget=budget,
+            )

@@ -415,7 +415,7 @@ public <booking> = <date_range[<departure>, <return>]>;
 
 
 def test_dollar_param_in_body_becomes_placeholder():
-    """Bare $param in body becomes PARAM literal so pyjsgf can parse the rule."""
+    """Bare $param in body becomes PARM_<name> literal so pyjsgf can parse the rule."""
     source = """\
 #JSGF V1.0;
 grammar test;
@@ -424,7 +424,9 @@ public <date_range[$start, $end]> = from $start to $end;
     stripped = _strip_dialect_tags(source)
     assert '$start' not in stripped
     assert '$end' not in stripped
-    assert 'PARAM' in stripped
+    # Named tokens (not the old flat PARAM)
+    assert 'PARM_start' in stripped
+    assert 'PARM_end' in stripped
 
 
 def test_parameterized_fixture_parses_ok():
@@ -467,3 +469,76 @@ INVALID SYNTAX !!!
     assert rule is not None
     assert rule.pyjsgf_name == 'transfer__currency_usd'
     assert rule.params == ['from', 'to']
+
+
+# ------------------------------------------------------------------ #
+#  Indexed placeholder maps (lazy loading)                             #
+# ------------------------------------------------------------------ #
+
+def test_func_placeholders_populated():
+    """GrammarDocument.func_placeholders maps PLHDR0 → ('lookup', ['bank_names'])."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <check_balance> = balance of $lookup('bank_names');
+"""
+    doc = GrammarDocument.parse(Path('/tmp/func_plhdr.gram'), source)
+    assert doc.parse_error is None
+    assert len(doc.func_placeholders) == 1
+    token, info = next(iter(doc.func_placeholders.items()))
+    assert token.startswith('PLHDR')
+    fn_name, fn_args = info
+    assert fn_name == 'lookup'
+    assert fn_args == ['bank_names']
+
+
+def test_func_placeholders_indexed():
+    """Multiple $func() calls get distinct PLHDR<n> tokens."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <transfer> = from $lookup('banks') to $lookup('banks');
+"""
+    doc = GrammarDocument.parse(Path('/tmp/multi_plhdr.gram'), source)
+    assert doc.parse_error is None
+    assert len(doc.func_placeholders) == 2
+    tokens = set(doc.func_placeholders.keys())
+    assert 'PLHDR0' in tokens
+    assert 'PLHDR1' in tokens
+
+
+def test_param_call_sites_populated():
+    """GrammarDocument.param_call_sites records call-site args for parameterized rules."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <transfer[$from, $to]> = transfer $from to $to;
+public <savings> = savings;
+public <chequing> = chequing;
+public <my_transfer> = <transfer[<savings>, <chequing>]>;
+"""
+    doc = GrammarDocument.parse(Path('/tmp/call_sites.gram'), source)
+    assert doc.parse_error is None
+    sites = doc.param_call_sites.get('transfer', [])
+    assert len(sites) >= 1
+    first_args = sites[0]
+    assert len(first_args) == 2
+    assert '<savings>' in first_args[0]
+    assert '<chequing>' in first_args[1]
+
+
+def test_strip_dialect_tags_with_maps():
+    """_strip_dialect_tags populates func_map and param_map when provided."""
+    source = "from $start to $end and $lookup('banks')"
+    func_map: dict = {}
+    param_map: dict = {}
+    stripped = _strip_dialect_tags(source, func_map=func_map, param_map=param_map)
+    assert '$start' not in stripped
+    assert 'PARM_start' in stripped
+    assert 'PARM_end' in stripped
+    assert param_map.get('PARM_start') == 'start'
+    assert param_map.get('PARM_end') == 'end'
+    assert len(func_map) == 1
+    fn_name, fn_args = next(iter(func_map.values()))
+    assert fn_name == 'lookup'
+    assert fn_args == ['banks']
