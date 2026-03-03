@@ -5,8 +5,34 @@ Generate a JSGF grammar rule from a natural-language intent description using an
 ## Prerequisites
 
 ```bash
-pip install anthropic
-export ANTHROPIC_API_KEY=sk-ant-...
+pip install openai
+```
+
+Configure your provider via environment variables:
+
+| Variable | Description |
+|---|---|
+| `LLM_BASE_URL` | API base URL (omit for OpenAI default) |
+| `LLM_API_KEY` | API key (falls back to `OPENAI_API_KEY`) |
+| `LLM_MODEL` | Default model name |
+
+### Provider examples
+
+```bash
+# OpenAI (default)
+export OPENAI_API_KEY=sk-...
+
+# Anthropic
+export LLM_BASE_URL=https://api.anthropic.com/v1
+export LLM_API_KEY=$ANTHROPIC_API_KEY
+
+# Ollama (local)
+export LLM_BASE_URL=http://localhost:11434/v1
+export LLM_API_KEY=ollama
+
+# OpenRouter
+export LLM_BASE_URL=https://openrouter.ai/api/v1
+export LLM_API_KEY=$OPENROUTER_API_KEY
 ```
 
 ## Usage
@@ -24,6 +50,8 @@ python skills/jsgf-generate/generate.py grammars/transfer.gram \
 | `--examples` | — | JSON array of required utterances (all must match) |
 | `--workspace` | Parent dir of file | Workspace root |
 | `--max-iterations` | `5` | Maximum LLM correction attempts |
+| `--model` | `LLM_MODEL` or `gpt-4o` | Model name |
+| `--base-url` | `LLM_BASE_URL` | API base URL override |
 
 ## How it works
 

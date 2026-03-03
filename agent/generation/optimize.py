@@ -10,7 +10,7 @@ Usage:
         --output optimized_program.json \
         --workspace path/to/workspace
 
-Requires: pip install dspy anthropic
+Requires: pip install dspy openai  (DSPy configures its own LM backend)
 """
 
 from __future__ import annotations

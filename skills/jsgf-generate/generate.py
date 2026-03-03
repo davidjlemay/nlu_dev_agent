@@ -2,13 +2,27 @@
 """
 jsgf-generate: Generate a JSGF rule from a natural-language intent description.
 
-This is a thin wrapper over the agentic correction loop. It requires an
-ANTHROPIC_API_KEY environment variable and the `anthropic` package.
+This is a thin wrapper over the agentic correction loop. It works with any
+OpenAI-compatible LLM provider (OpenAI, Anthropic, Ollama, OpenRouter, etc.).
+
+Configuration via environment variables:
+    LLM_BASE_URL   API base URL  (default: OpenAI; use https://api.anthropic.com/v1
+                   for Anthropic, http://localhost:11434/v1 for Ollama, etc.)
+    LLM_API_KEY    API key       (default: OPENAI_API_KEY)
+    LLM_MODEL      Default model (default: gpt-4o)
 
 Usage:
     python generate.py <file.gram> \
         --intent "Transfer funds between accounts" \
         --examples '["transfer 100 to savings", "move fifty dollars"]'
+
+    # Anthropic
+    LLM_BASE_URL=https://api.anthropic.com/v1 LLM_API_KEY=$ANTHROPIC_API_KEY \
+        python generate.py grammars/transfer.gram --model claude-opus-4-6 ...
+
+    # Ollama (local)
+    LLM_BASE_URL=http://localhost:11434/v1 LLM_API_KEY=ollama \
+        python generate.py grammars/transfer.gram --model llama3 ...
 
 Outputs the generated grammar source to stdout and validation results to stderr.
 """
@@ -16,6 +30,7 @@ Outputs the generated grammar source to stdout and validation results to stderr.
 import argparse
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -47,6 +62,16 @@ def main():
         default=5,
         help='Maximum correction iterations (default: 5)',
     )
+    parser.add_argument(
+        '--model', '-m',
+        default=None,
+        help='Model name (default: LLM_MODEL env var, or gpt-4o)',
+    )
+    parser.add_argument(
+        '--base-url',
+        default=None,
+        help='API base URL (default: LLM_BASE_URL env var, or OpenAI default)',
+    )
     args = parser.parse_args()
 
     file_path = Path(args.file).resolve()
@@ -57,6 +82,10 @@ def main():
     except json.JSONDecodeError as e:
         print(f"Error: Invalid --examples JSON: {e}", file=sys.stderr)
         sys.exit(1)
+
+    model = args.model or os.environ.get('LLM_MODEL', 'gpt-4o')
+    base_url = args.base_url or os.environ.get('LLM_BASE_URL') or None
+    api_key = os.environ.get('LLM_API_KEY') or None  # falls back to OPENAI_API_KEY inside openai
 
     dialect_cfg = workspace / 'jsgf-dialect.json'
     dialect = (
@@ -70,9 +99,9 @@ def main():
 
     try:
         from agent.generation.loop import generate_grammar
-        import anthropic
+        import openai
 
-        client = anthropic.Anthropic()
+        client = openai.OpenAI(base_url=base_url, api_key=api_key)
 
         async def run():
             result = await generate_grammar(
@@ -82,6 +111,7 @@ def main():
                 description=args.intent,
                 examples=examples,
                 max_iterations=args.max_iterations,
+                model=model,
             )
             return result
 
@@ -96,8 +126,8 @@ def main():
     except ImportError as e:
         print(
             f"Error: {e}\n"
-            "Install the anthropic package: pip install anthropic\n"
-            "Then set ANTHROPIC_API_KEY in your environment.",
+            "Install the openai package: pip install openai\n"
+            "Then configure your provider via LLM_BASE_URL / LLM_API_KEY / LLM_MODEL.",
             file=sys.stderr,
         )
         sys.exit(1)

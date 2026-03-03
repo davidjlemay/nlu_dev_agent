@@ -8,7 +8,7 @@ generate_grammar() iterates:
 4. If perfect → return source
 5. If not → build typed correction prompt and retry
 
-Uses the Anthropic API directly (no DSPy dependency for the loop itself).
+Uses any OpenAI-compatible client (openai.OpenAI or AsyncOpenAI).
 DSPy is only used in optimize.py for prompt optimisation.
 """
 
@@ -116,13 +116,13 @@ def _build_correction_prompt(
 
 
 async def generate_grammar(
-    client,       # anthropic.Anthropic
+    client,       # openai.OpenAI or any OpenAI-compatible client
     api: GrammarAgentAPI,
     target_file: Path,
     description: str,
     examples: list[str],
     max_iterations: int = 5,
-    model: str = 'claude-opus-4-6',
+    model: str = 'gpt-4o',
 ) -> Optional[str]:
     """
     Generate and iteratively correct a JSGF grammar.
@@ -132,17 +132,19 @@ async def generate_grammar(
     context = api.get_generation_context(target_file, description, examples)
     prompt = _build_generation_prompt(description, examples, context, target_file)
 
-    messages = [{'role': 'user', 'content': prompt}]
+    messages = [
+        {'role': 'system', 'content': _SYSTEM_PROMPT},
+        {'role': 'user', 'content': prompt},
+    ]
 
     for iteration in range(max_iterations):
-        # Call LLM
-        response = client.messages.create(
+        # Call LLM via OpenAI-compatible chat completions API
+        response = client.chat.completions.create(
             model=model,
-            max_tokens=4096,
-            system=_SYSTEM_PROMPT,
+            max_completion_tokens=4096,
             messages=messages,
         )
-        source = response.content[0].text.strip()
+        source = response.choices[0].message.content.strip()
 
         # Strip any accidental markdown fences
         if source.startswith('```'):
