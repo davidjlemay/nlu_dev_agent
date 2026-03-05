@@ -32,7 +32,7 @@ sys.path.insert(0, str(_HERE))
 from core.dialect import DialectRegistry
 from core.document import GrammarDocument
 from core.index import GrammarIndex
-from core.validator import validate_dialect
+from core.validator import validate_dialect, validate_engine_capabilities
 
 
 def main():
@@ -69,6 +69,7 @@ def main():
     doc = index._documents[file_path]
     diags = doc.get_diagnostics(index)
     diags += validate_dialect(doc, dialect)
+    diags += validate_engine_capabilities(doc, dialect, index)
 
     result = {
         'file': str(file_path),

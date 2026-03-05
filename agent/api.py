@@ -64,6 +64,7 @@ class GenerationContext:
     dialect_functions: list[dict]    # serialisable function specs
     similar_rules: list[dict]        # top-N rules by utterance overlap
     import_suggestions: list[str]    # file paths worth importing
+    engine_capabilities: dict        # serialisable EngineCapabilities
 
     def as_dict(self) -> dict:
         return {
@@ -71,6 +72,7 @@ class GenerationContext:
             'dialect_functions': self.dialect_functions,
             'similar_rules': self.similar_rules,
             'import_suggestions': self.import_suggestions,
+            'engine_capabilities': self.engine_capabilities,
         }
 
 
@@ -248,11 +250,19 @@ class GrammarAgentAPI:
             }
             for fn in self.index.dialect.functions.values()
         ]
+        caps = self.index.dialect.capabilities
+        engine_capabilities = {
+            'max_public_rules': caps.max_public_rules,
+            'flags': caps.flags,
+            'function_map': caps.function_map,
+            'allow_parameterized_rules': caps.allow_parameterized_rules,
+        }
         return GenerationContext(
             existing_rules=existing,
             dialect_functions=dialect_functions,
             similar_rules=similar,
             import_suggestions=import_suggestions,
+            engine_capabilities=engine_capabilities,
         )
 
     # ---------------------------------------------------------------- #
@@ -270,10 +280,11 @@ class GrammarAgentAPI:
         Returns (diagnostics, coverage_result).
         coverage_result is None if there are parse errors.
         """
-        from core.validator import validate_dialect
+        from core.validator import validate_dialect, validate_engine_capabilities
         doc = GrammarDocument.parse(target_file, source)
         diags = doc.get_diagnostics(self.index)
         diags += validate_dialect(doc, self.index.dialect)
+        diags += validate_engine_capabilities(doc, self.index.dialect, self.index)
         if diags:
             return diags, None
 

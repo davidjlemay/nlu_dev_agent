@@ -14,12 +14,16 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from lsprotocol import types as lsp
 
 from .dialect import DialectRegistry
 from .patch import Position
 from .document import GrammarDocument, _pos_to_range
+
+if TYPE_CHECKING:
+    from .index import GrammarIndex
 
 
 # Typed flag pattern:  key:type=value
@@ -182,6 +186,127 @@ def validate_dialect(
                     severity=lsp.DiagnosticSeverity.Error,
                     source='jsgf-lsp',
                 ))
+
+    return diags
+
+
+def validate_engine_capabilities(
+    doc: GrammarDocument,
+    dialect: DialectRegistry,
+    index: 'GrammarIndex | None' = None,
+) -> list[lsp.Diagnostic]:
+    """
+    Return engine capability constraint diagnostics for *doc*.
+
+    Checks: max_public_rules, flag positions, function_map, parameterized rules.
+    """
+    caps = dialect.capabilities
+    diags: list[lsp.Diagnostic] = []
+    offsets = _line_offsets(doc.source)
+
+    # ------------------------------------------------------------------ #
+    #  Max public rules (root grammars only)                              #
+    # ------------------------------------------------------------------ #
+    if caps.max_public_rules is not None:
+        is_root = index is None or not index.is_library(doc.path)
+        if is_root:
+            public_rules = [r for r in doc.rules if r.visible]
+            for extra in public_rules[caps.max_public_rules:]:
+                pos = doc.def_positions.get(extra.name, Position(0, 0))
+                diags.append(lsp.Diagnostic(
+                    range=_pos_to_range(pos, len(extra.name)),
+                    message=(
+                        f"Engine '{dialect.engine}' allows at most "
+                        f"{caps.max_public_rules} public rule(s); "
+                        f"<{extra.name}> exceeds this limit."
+                    ),
+                    severity=lsp.DiagnosticSeverity.Error,
+                    source='jsgf-lsp',
+                ))
+
+    # ------------------------------------------------------------------ #
+    #  Flag position constraints                                          #
+    # ------------------------------------------------------------------ #
+    if caps.flags != "both":
+        # Collect LHS flag block positions
+        lhs_flag_offsets: set[int] = set()
+        lhs_flag_spans: list[tuple[int, int]] = []  # (start, length)
+        for rule_m in _LHS_RULE_RE.finditer(doc.source):
+            for block_m in re.finditer(r'\{[^}]*\}', rule_m.group(1)):
+                abs_start = rule_m.start(1) + block_m.start()
+                lhs_flag_offsets.add(abs_start)
+                lhs_flag_spans.append((abs_start, len(block_m.group(0))))
+
+        if caps.flags == "none":
+            for m in re.finditer(r'\{[^}]*\}', doc.source):
+                pos = _offset_to_position(m.start(), offsets)
+                diags.append(lsp.Diagnostic(
+                    range=_pos_to_range(pos, len(m.group(0))),
+                    message=(
+                        f"Engine '{dialect.engine}' does not support tags or flags."
+                    ),
+                    severity=lsp.DiagnosticSeverity.Error,
+                    source='jsgf-lsp',
+                ))
+        elif caps.flags == "lhs_only":
+            for m in re.finditer(r'\{[^}]*\}', doc.source):
+                if m.start() not in lhs_flag_offsets:
+                    pos = _offset_to_position(m.start(), offsets)
+                    diags.append(lsp.Diagnostic(
+                        range=_pos_to_range(pos, len(m.group(0))),
+                        message=(
+                            f"Engine '{dialect.engine}' only supports LHS flags, "
+                            f"not RHS tags."
+                        ),
+                        severity=lsp.DiagnosticSeverity.Error,
+                        source='jsgf-lsp',
+                    ))
+        elif caps.flags == "rhs_only":
+            for abs_start, length in lhs_flag_spans:
+                pos = _offset_to_position(abs_start, offsets)
+                diags.append(lsp.Diagnostic(
+                    range=_pos_to_range(pos, length),
+                    message=(
+                        f"Engine '{dialect.engine}' only supports RHS tags, "
+                        f"not LHS flags."
+                    ),
+                    severity=lsp.DiagnosticSeverity.Error,
+                    source='jsgf-lsp',
+                ))
+
+    # ------------------------------------------------------------------ #
+    #  Function map constraint                                            #
+    # ------------------------------------------------------------------ #
+    if caps.function_map is not None:
+        for m in _FUNC_RE.finditer(doc.source):
+            fn_name = m.group(1)
+            if fn_name not in caps.function_map:
+                pos = _offset_to_position(m.start(), offsets)
+                allowed = list(caps.function_map.keys())
+                msg = f"Engine '{dialect.engine}' does not support function '${fn_name}'."
+                if allowed:
+                    msg += f" Allowed: {allowed}"
+                diags.append(lsp.Diagnostic(
+                    range=_pos_to_range(pos, len(m.group(0))),
+                    message=msg,
+                    severity=lsp.DiagnosticSeverity.Error,
+                    source='jsgf-lsp',
+                ))
+
+    # ------------------------------------------------------------------ #
+    #  Parameterized rules constraint                                     #
+    # ------------------------------------------------------------------ #
+    if not caps.allow_parameterized_rules:
+        for m in _PARAM_DECL_RE.finditer(doc.source):
+            pos = _offset_to_position(m.start(), offsets)
+            diags.append(lsp.Diagnostic(
+                range=_pos_to_range(pos, len(m.group(0))),
+                message=(
+                    f"Engine '{dialect.engine}' does not support parameterized rules."
+                ),
+                severity=lsp.DiagnosticSeverity.Error,
+                source='jsgf-lsp',
+            ))
 
     return diags
 

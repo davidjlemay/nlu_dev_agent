@@ -1,6 +1,12 @@
 {
   "engine": "proprietary-asr-v2",
   "version": "1.0",
+  "capabilities": {
+    "max_public_rules": null,
+    "flags": "both",
+    "function_map": null,
+    "allow_parameterized_rules": true
+  },
   "lazy_loading": {
     "lookup_limit": 50,
     "expansion_limit": 200

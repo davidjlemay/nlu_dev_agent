@@ -32,6 +32,18 @@ class LazyLoadingConfig:
 
 
 @dataclass
+class EngineCapabilities:
+    """Constraints on what dialect features the target engine can process."""
+    max_public_rules: int | None = None
+    # "none" | "lhs_only" | "rhs_only" | "both"
+    flags: str = "both"
+    # None = all canonical functions pass through unchanged
+    # dict = subset + optional rename {canonical: engine_name}; {} = no functions
+    function_map: dict[str, str] | None = None
+    allow_parameterized_rules: bool = True
+
+
+@dataclass
 class ParameterSpec:
     name: str
     type: str          # 'rule_ref' | 'string' | 'int' | 'float' | 'bool' | 'enum'
@@ -58,6 +70,7 @@ class DialectRegistry:
     lhs_flags_enabled: bool = False
     lazy_loading: LazyLoadingConfig = field(default_factory=LazyLoadingConfig)
     data_sources: dict[str, DataSource] = field(default_factory=dict)
+    capabilities: EngineCapabilities = field(default_factory=EngineCapabilities)
 
     @classmethod
     def from_config(cls, path: Path) -> DialectRegistry:
@@ -96,6 +109,13 @@ class DialectRegistry:
                 command=src_spec.get('command'),
                 args=src_spec.get('args', []),
             )
+        caps_raw = data.get('capabilities', {})
+        capabilities = EngineCapabilities(
+            max_public_rules=caps_raw.get('max_public_rules', None),
+            flags=caps_raw.get('flags', 'both'),
+            function_map=caps_raw.get('function_map', None),
+            allow_parameterized_rules=caps_raw.get('allow_parameterized_rules', True),
+        )
         return cls(
             engine=data['engine'],
             functions=functions,
@@ -107,6 +127,7 @@ class DialectRegistry:
             lhs_flags_enabled=flags.get('allow_lhs', False),
             lazy_loading=lazy_loading,
             data_sources=data_sources,
+            capabilities=capabilities,
         )
 
     @classmethod

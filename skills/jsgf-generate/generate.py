@@ -84,7 +84,7 @@ def main():
         print(f"Error: Invalid --examples JSON: {e}", file=sys.stderr)
         sys.exit(1)
 
-    model = args.model or os.environ.get('LLM_MODEL', 'gpt-4o')
+    model = args.model or os.environ.get('LLM_MODEL', 'gpt-4o-mini')
     base_url = args.base_url or os.environ.get('LLM_BASE_URL') or None
     api_key = os.environ.get('LLM_API_KEY') or None  # falls back to OPENAI_API_KEY inside openai
 

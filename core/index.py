@@ -210,6 +210,10 @@ class GrammarIndex:
         except Exception:
             pass  # Best-effort; unresolvable imports are reported as diagnostics
 
+    def is_library(self, path: Path) -> bool:
+        """Return True if *path* is imported by at least one other document."""
+        return bool(self._dependents.get(path))
+
     def find_references(self, rule_name: str) -> list[tuple[Path, list]]:
         """
         Find all files that reference *rule_name*.

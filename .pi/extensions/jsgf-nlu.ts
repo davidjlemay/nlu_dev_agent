@@ -13,6 +13,7 @@
 import { Type } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import * as path from "path";
+import * as fs from "node:fs";
 
 export default function (pi: ExtensionAPI) {
 	// ---------------------------------------------------------------- //
@@ -192,7 +193,34 @@ Returns JSON: { existing_rules, dialect_functions, similar_rules, import_suggest
 				.map((s) => s.trim())
 				.filter(Boolean);
 
+			// Build engine constraints section from jsgf-dialect.json
+			const dialectPath = path.join(ctx.cwd, "jsgf-dialect.json");
+			let capsSection = "";
+			if (fs.existsSync(dialectPath)) {
+				const dialect = JSON.parse(fs.readFileSync(dialectPath, "utf-8"));
+				const caps = dialect.capabilities ?? {};
+				const lines: string[] = ["**Engine constraints:**"];
+				if (caps.max_public_rules != null)
+					lines.push(`- Max ${caps.max_public_rules} public rule(s) per grammar`);
+				if (caps.allow_parameterized_rules === false)
+					lines.push("- Parameterized rules are NOT supported");
+				if (caps.flags === "none")
+					lines.push("- Tags/flags are NOT supported");
+				else if (caps.flags === "lhs_only")
+					lines.push("- Only LHS flags allowed; no RHS tags");
+				else if (caps.flags === "rhs_only")
+					lines.push("- Only RHS tags allowed; no LHS flags");
+				if (caps.function_map !== null && caps.function_map !== undefined) {
+					const fns = Object.keys(caps.function_map ?? {});
+					lines.push(fns.length
+						? `- Only these functions allowed: ${fns.map((f) => `$${f}`).join(", ")}`
+						: "- Custom functions are NOT supported");
+				}
+				if (lines.length > 1) capsSection = lines.join("\n") + "\n\n";
+			}
+
 			const prompt =
+				capsSection +
 				`Generate a JSGF grammar rule for the following intent.\n\n` +
 				`**Target file:** ${targetFile}\n` +
 				`**Intent:** ${intentDesc}\n` +

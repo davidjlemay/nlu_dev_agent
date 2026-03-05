@@ -20,4 +20,8 @@ fi
 
 # Run from project root so .pi/ is discovered
 cd "${SCRIPT_DIR}"
+
+# Regenerate system prompt from dialect config
+"${SCRIPT_DIR}/.venv/bin/python3" "${SCRIPT_DIR}/scripts/render_pi_prompt.py"
+
 exec node "${PI}" "$@"

@@ -122,7 +122,7 @@ async def generate_grammar(
     description: str,
     examples: list[str],
     max_iterations: int = 5,
-    model: str = 'gpt-4o',
+    model: str = 'gpt-4o-mini',
 ) -> Optional[str]:
     """
     Generate and iteratively correct a JSGF grammar.

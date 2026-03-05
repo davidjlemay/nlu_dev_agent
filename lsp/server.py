@@ -27,7 +27,7 @@ from core.dialect import DialectRegistry
 from core.document import GrammarDocument, _pos_to_range
 from core.index import GrammarIndex, RuleLocation
 from core.patch import Position
-from core.validator import validate_dialect
+from core.validator import validate_dialect, validate_engine_capabilities
 
 # ------------------------------------------------------------------ #
 #  Server singleton                                                    #
@@ -67,6 +67,7 @@ def _sync_and_publish(ls: LanguageServer, uri: str, source: str) -> None:
             continue
         diags = doc.get_diagnostics(index)
         diags += validate_dialect(doc, index.dialect)
+        diags += validate_engine_capabilities(doc, index.dialect, index)
         ls.text_document_publish_diagnostics(lsp.PublishDiagnosticsParams(
             uri=_path_to_uri(aff_path),
             diagnostics=diags,
