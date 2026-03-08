@@ -2,9 +2,9 @@
   "engine": "proprietary-asr-v2",
   "version": "1.0",
   "capabilities": {
-    "max_public_rules": null,
-    "flags": "both",
-    "function_map": null,
+    "max_public_rules": 1,
+    "flags": "lhs_only",
+    "function_map": {"lookup": "lookup"},
     "allow_parameterized_rules": true
   },
   "lazy_loading": {
@@ -12,7 +12,7 @@
     "expansion_limit": 200
   },
   "data_sources": {
-    "bank_names": { "type": "file", "path": "data/bank_names.txt" },
+    "bank_names": { "type": "file", "path": "nonterminals/bank_names.txt" },
     "currencies":  { "type": "inline", "values": ["USD", "EUR", "GBP"] }
   },
   "flags": {
