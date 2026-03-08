@@ -643,13 +643,15 @@ class TrajectoryGenerator:
 
     def __init__(self, llm_client: LLMClient, tool_schemas: Dict,
                  max_tokens: int = 4000, temperature: float = 0.7,
-                 no_critic: bool = False, max_critic_iterations: int = 2):
+                 no_critic: bool = False, max_critic_iterations: int = 3,
+                 critic_threshold: float = 0.8):
         self.llm = llm_client
         self.tools = tool_schemas
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.no_critic = no_critic
         self.max_critic_iterations = max_critic_iterations
+        self.critic_threshold = critic_threshold
 
     def generate_subtask_trajectory(self, subtask: Subtask,
                                     commits: List[Dict],
@@ -657,8 +659,9 @@ class TrajectoryGenerator:
         """
         Generate a step-by-step trajectory for a subtask.
 
-        When critic is enabled, runs an actor/critic loop (up to
-        max_critic_iterations) before returning the final trajectory.
+        When the critic is enabled, runs an actor/critic loop up to
+        max_critic_iterations times, keeping the highest-scoring trajectory.
+        Exits early once a trajectory scores >= critic_threshold.
 
         Returns:
             Markdown-formatted trajectory with reasoning, actions, and observations
@@ -675,8 +678,11 @@ class TrajectoryGenerator:
         if self.no_critic:
             return trajectory
 
-        # Actor / critic refinement loop
+        # Actor / critic loop — track best across all iterations
         all_diff_files = self._collect_diff_files(commits)
+        best_trajectory = trajectory
+        best_score = 0.0
+
         for iteration in range(self.max_critic_iterations):
             critic_prompt = self._build_critic_prompt(subtask, trajectory, all_diff_files)
             critic_raw = self.llm.generate(
@@ -688,26 +694,33 @@ class TrajectoryGenerator:
             try:
                 feedback = json.loads(RequirementsParser._clean_json_response(critic_raw))
             except json.JSONDecodeError:
-                print(f"  [critic] iter {iteration + 1}: failed to parse response — keeping trajectory")
+                print(f"  [critic] iter {iteration + 1}: failed to parse response — keeping best so far")
                 break
 
-            if feedback.get("approved"):
-                print(f"  [critic] approved on iteration {iteration + 1}")
-                break
+            score = float(feedback.get("score", 0.0))
+            if score > best_score:
+                best_score = score
+                best_trajectory = trajectory
 
             issue_summary = str(feedback.get("feedback", ""))[:120]
-            print(f"  [critic] iter {iteration + 1}: revising — {issue_summary}")
+            print(f"  [critic] iter {iteration + 1}: score={score:.2f} — {issue_summary or 'no issues'}")
 
-            revision_prompt = self._build_revision_prompt(
-                actor_prompt, trajectory, feedback.get("feedback", "")
-            )
-            trajectory = self.llm.generate(
-                revision_prompt,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-            )
+            if best_score >= self.critic_threshold:
+                print(f"  [critic] threshold {self.critic_threshold} reached — stopping")
+                break
 
-        return trajectory
+            if iteration < self.max_critic_iterations - 1:
+                revision_prompt = self._build_revision_prompt(
+                    actor_prompt, trajectory, feedback.get("feedback", "")
+                )
+                trajectory = self.llm.generate(
+                    revision_prompt,
+                    max_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                )
+
+        print(f"  [critic] best score: {best_score:.2f} across {iteration + 1} iteration(s)")
+        return best_trajectory
 
     # ── prompt builders ──────────────────────────────────────────────────────
 
@@ -767,7 +780,7 @@ Format your response as markdown with clear sections for each step.
 
     def _build_critic_prompt(self, subtask: Subtask, trajectory: str,
                               diff_files: List[Dict]) -> str:
-        """Build the critic prompt that evaluates a generated trajectory."""
+        """Build the critic prompt that scores a generated trajectory."""
         diff_summary = _format_diff_files(diff_files, max_chars=3000) or "(no diff data)"
         return f"""You are a critic reviewing an NLU developer trajectory for correctness and realism.
 
@@ -779,7 +792,7 @@ ACTUAL FILE CHANGES (from git diffs):
 GENERATED TRAJECTORY:
 {trajectory}
 
-Evaluate the trajectory against these criteria:
+Score the trajectory 0.0–1.0 against these five criteria (each worth 0.2):
 1. Does it reference/address all changed files shown in the diffs?
 2. Does it read files before editing them?
 3. Does it include at least one test/validation step after changes?
@@ -787,7 +800,7 @@ Evaluate the trajectory against these criteria:
 5. Are tool call parameters concrete (real filenames, real content from diffs)?
 
 Respond with valid JSON only (no markdown):
-{{"approved": true/false, "feedback": "specific issues to fix, or empty string if approved"}}
+{{"score": 0.0, "feedback": "specific issues to fix, or empty string if all criteria are met"}}
 """
 
     def _build_revision_prompt(self, original_actor_prompt: str,
@@ -797,7 +810,7 @@ Respond with valid JSON only (no markdown):
 
 ---
 
-A previous attempt at this trajectory was rejected. Here is the critic's feedback:
+A previous attempt at this trajectory scored below the quality threshold. Here is the critic's feedback:
 
 FEEDBACK: {feedback}
 
@@ -850,7 +863,8 @@ class TranscriptGenerator:
 
     def __init__(self, llm_client: LLMClient, generic_instructions: str,
                  tool_schemas: Dict, max_tokens: int = 4000, temperature: float = 0.7,
-                 no_critic: bool = False, max_critic_iterations: int = 2):
+                 no_critic: bool = False, max_critic_iterations: int = 3,
+                 critic_threshold: float = 0.8):
         self.llm = llm_client
         self.instructions = generic_instructions
         self.tools = tool_schemas
@@ -863,6 +877,7 @@ class TranscriptGenerator:
             llm_client, tool_schemas, max_tokens, temperature,
             no_critic=no_critic,
             max_critic_iterations=max_critic_iterations,
+            critic_threshold=critic_threshold,
         )
     
     def generate_transcript_from_epic(self, epic_data: Dict) -> Dict:
@@ -1106,8 +1121,10 @@ def main():
                        help='Sampling temperature (default: 0.7)')
     parser.add_argument('--no-critic', action='store_true',
                        help='Disable actor/critic loop (single-pass generation)')
-    parser.add_argument('--max-critic-iterations', type=int, default=2,
-                       help='Max critic refinement iterations per trajectory (default: 2)')
+    parser.add_argument('--max-critic-iterations', type=int, default=3,
+                       help='Max actor/critic iterations per trajectory (default: 3)')
+    parser.add_argument('--critic-threshold', type=float, default=0.8,
+                       help='Score threshold [0–1] for early exit from critic loop (default: 0.8)')
 
     args = parser.parse_args()
     
@@ -1160,6 +1177,7 @@ def main():
         temperature=args.temperature,
         no_critic=args.no_critic,
         max_critic_iterations=args.max_critic_iterations,
+        critic_threshold=args.critic_threshold,
     )
     
     # Generate transcripts
