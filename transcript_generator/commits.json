@@ -1,0 +1,53 @@
+[
+  {
+    "id": "abc123def456",
+    "short_id": "abc123",
+    "title": "NLU-4821: Add check_baggage_fee intent and baggage_type non-terminal",
+    "message": "NLU-4821: Add check_baggage_fee intent and baggage_type non-terminal\n\n- Added check_baggage_fee intent to flight_booking.jsgf\n- Created baggage_type non-terminal with canonical reference\n- Added baggage_type canonical forms (checked, carry-on, oversized, sports equipment)\n- Grammar expansion successful\n\nChanges:\n- grammars/flight_booking.jsgf: Added intent pattern and non-terminal\n- canonicals/flight_booking_canonicals.txt: Added baggage type values",
+    "author_name": "Jane Developer",
+    "author_email": "jane@example.com",
+    "authored_date": "2024-01-17T14:22:00.000+00:00",
+    "committer_name": "Jane Developer",
+    "committer_email": "jane@example.com",
+    "committed_date": "2024-01-17T14:22:00.000+00:00",
+    "web_url": "https://gitlab.example.com/project/-/commit/abc123",
+    "from_mr_url": "https://gitlab.example.com/project/-/merge_requests/42",
+    "from_mr_iid": 42,
+    "project_path": "nlp/nlu-engine",
+    "jira_issues": ["NLU-4821"]
+  },
+  {
+    "id": "def456ghi789",
+    "short_id": "def456",
+    "title": "NLU-4821: Add unit tests for baggage fee queries",
+    "message": "NLU-4821: Add unit tests for baggage fee queries\n\n- Added 15 unit test utterances covering all baggage types\n- Tests include variations: checked, carry-on, oversized, sports equipment\n- Unit test accuracy: 100% (15/15)\n\nChanges:\n- tests/flight_booking_unit_tests.txt: Added 15 test cases",
+    "author_name": "Jane Developer",
+    "author_email": "jane@example.com",
+    "authored_date": "2024-01-17T15:10:00.000+00:00",
+    "committer_name": "Jane Developer",
+    "committer_email": "jane@example.com",
+    "committed_date": "2024-01-17T15:10:00.000+00:00",
+    "web_url": "https://gitlab.example.com/project/-/commit/def456",
+    "from_mr_url": "https://gitlab.example.com/project/-/merge_requests/42",
+    "from_mr_iid": 42,
+    "project_path": "nlp/nlu-engine",
+    "jira_issues": ["NLU-4821"]
+  },
+  {
+    "id": "ghi789jkl012",
+    "short_id": "ghi789",
+    "title": "NLU-4821: Fix baggage_type canonical variations and add default",
+    "message": "NLU-4821: Fix baggage_type canonical variations and add default\n\n- Added more variations for sports equipment (sporting equipment, special item)\n- Added default value {checked} for generic \"baggage fees\" queries\n- Re-expanded grammar and re-ran tests\n- Unit test accuracy: 100% (15/15)\n\nChanges:\n- canonicals/flight_booking_canonicals.txt: Added variations\n- grammars/flight_booking.jsgf: Added default value for baggage_type",
+    "author_name": "Jane Developer",
+    "author_email": "jane@example.com",
+    "authored_date": "2024-01-17T16:35:00.000+00:00",
+    "committer_name": "Jane Developer",
+    "committer_email": "jane@example.com",
+    "committed_date": "2024-01-17T16:35:00.000+00:00",
+    "web_url": "https://gitlab.example.com/project/-/commit/ghi789",
+    "from_mr_url": "https://gitlab.example.com/project/-/merge_requests/42",
+    "from_mr_iid": 42,
+    "project_path": "nlp/nlu-engine",
+    "jira_issues": ["NLU-4821"]
+  }
+]

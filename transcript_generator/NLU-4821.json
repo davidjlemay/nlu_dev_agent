@@ -1,0 +1,17 @@
+{
+  "key": "NLU-4821",
+  "id": "12345",
+  "fields": {
+    "summary": "Add coverage for baggage fee queries in flight booking domain",
+    "description": "This epic is considered complete",
+    "customfield_11232": "Add support for baggage fee related queries in the flight booking domain.\n\nRequirements:\n- Add new intent: check_baggage_fee\n- Support queries like:\n  * \"how much is checked baggage\"\n  * \"what are the fees for carry-on bags\"\n  * \"baggage fees for international flights\"\n  * \"cost of oversized luggage\"\n- Add baggage_type non-terminal with canonical forms:\n  * checked / checked bag\n  * carry-on / carry on / hand luggage\n  * oversized / oversized bag\n  * sports equipment / sporting equipment\n- Add minimum 15 unit test utterances\n- Target accuracy: >92% on dev set\n\nAcceptance Criteria:\n- Grammar expands without errors\n- All unit tests pass\n- Minimum 15 test utterances covering all baggage types\n- Manual spot checking confirms correct intent/slot extraction",
+    "status": {
+      "name": "Done"
+    },
+    "assignee": {
+      "displayName": "Jane Developer"
+    },
+    "created": "2024-01-15T10:30:00.000+0000",
+    "updated": "2024-01-18T16:45:00.000+0000"
+  }
+}

@@ -1,0 +1,234 @@
+# NLU Development Instructions
+
+## Overview
+This document provides standard procedures for NLU development tasks including adding intents, non-terminals, canonical forms, and unit tests.
+
+## Workflow Steps
+
+### 1. Environment Setup
+- Create a working branch from main: `git checkout -b <ticket-id>-description`
+- Pull latest changes: `git pull origin main`
+- Verify domain structure exists
+
+### 2. Adding New Intents
+
+#### Steps:
+1. Review existing intent patterns in the grammar file
+2. Identify similar patterns in related domains for consistency
+3. Add the intent to the public intent rule
+4. Define the intent pattern following conventions:
+   - Use clear, descriptive patterns
+   - Include optional elements in brackets []
+   - Use alternation | for variations
+   - Reference non-terminals with angle brackets <>
+   - Reference canonicals with @canonical_name
+5. Expand grammar to verify syntax: `./scripts/expand_grammar.sh <domain>.jsgf`
+6. Run unit tests to validate coverage
+7. Iterate on failures
+
+#### Common Issues:
+- Undefined non-terminals: Ensure all referenced non-terminals exist
+- Syntax errors: Check bracket matching and JSGF syntax
+- Insufficient coverage: Add more pattern variations
+
+### 3. Adding Non-Terminals
+
+#### Steps:
+1. Identify the non-terminal name (use snake_case)
+2. Add definition in grammar: `<non_terminal_name> = @canonical_reference;`
+3. Ensure canonical reference exists or will be created
+4. Expand grammar to verify
+5. Add canonical values (see section 4)
+
+#### Conventions:
+- Use descriptive names
+- Reference canonicals with @ prefix
+- Add inline values with {curly braces} for defaults
+
+### 4. Adding Canonical Forms
+
+#### Steps:
+1. Read existing canonical file to understand format
+2. Identify the canonical category (@category_name)
+3. Add canonical values following format: `@category: value1 | value2 | value3`
+4. Include common variations and synonyms
+5. Consider morphological variations (plurals, verb forms, etc.)
+6. Expand grammar and test
+
+#### Format:
+```
+# Category description
+@category_name: canonical_form_1 | canonical_form_2 | canonical_form_3
+```
+
+#### Best Practices:
+- Include common misspellings if relevant
+- Add abbreviations and full forms
+- Consider case variations
+- Group related forms together
+
+### 5. Adding Unit Tests
+
+#### Steps:
+1. Review test file format
+2. Generate diverse test utterances covering:
+   - All intent variations
+   - All slot value combinations
+   - Edge cases (very short, very long)
+   - Natural language variations
+3. Format: `utterance | expected_intent | slot1:value1,slot2:value2`
+4. Aim for minimum 15 test cases per intent
+5. Run tests: `python scripts/run_unit_tests.py --domain <domain>`
+6. Achieve >95% accuracy
+
+#### Test Coverage Targets:
+- Each intent pattern variation
+- Each non-terminal value
+- Common phrasings
+- Negative cases (if applicable)
+
+### 6. JSGF Expansion and Testing Loop
+
+The development workflow includes an automated expansion and testing cycle:
+
+1. Edit grammar files
+2. Run expansion: `./scripts/expand_grammar.sh <domain>.jsgf`
+   - Generates all possible utterances from grammar
+   - Validates JSGF syntax
+   - Creates test utterances automatically
+3. Review expansion output:
+   - Check utterance count
+   - Verify patterns look correct
+   - Note any warnings or errors
+4. Run unit tests automatically after expansion
+5. Analyze failures:
+   - Grammar syntax errors
+   - Missing canonical values
+   - Incorrect slot assignments
+6. Iterate: fix issues and re-expand/test
+7. Validate coverage meets requirements
+
+### 7. Regex Normalization Rules
+
+#### Steps:
+1. Identify normalization category (dates, numbers, currency, etc.)
+2. Read existing regex patterns
+3. Add or modify pattern following conventions:
+   - Escape special characters: `\. \? \!`
+   - Use character classes: `[0-9] [a-z]`
+   - Use quantifiers: `+ * ? {n,m}`
+   - Test pattern in isolation first
+4. Test normalization: `python scripts/test_normalization.py --pattern <pattern>`
+5. Validate against test cases
+
+#### Common Regex Patterns:
+- Dates: `\d{1,2}/\d{1,2}/\d{4}`
+- Times: `\d{1,2}:\d{2}\s*(am|pm)?`
+- Currency: `\$\d+(\.\d{2})?`
+- Phone: `\d{3}-\d{3}-\d{4}`
+
+### 8. Grammar Modifications
+
+When modifying existing grammars:
+1. Read current grammar structure carefully
+2. Identify modification point (which rule to change)
+3. Make minimal changes to achieve goal
+4. Preserve existing functionality
+5. Expand and test to verify no regressions
+6. Check that existing tests still pass
+
+### 9. Validation and Testing
+
+Before committing:
+1. Expand grammar successfully (no syntax errors)
+2. All unit tests pass
+3. Test coverage meets minimum requirements (usually 15+ tests per intent)
+4. Spot check: manually test 3-5 utterances
+5. No regressions in existing functionality
+
+### 10. Commit Guidelines
+
+Format commit messages:
+```
+<TICKET-ID>: <Brief summary>
+
+- Detailed change 1
+- Detailed change 2
+- Test results: accuracy, coverage
+
+Changes:
+- file1: description
+- file2: description
+```
+
+Include metrics when available:
+- Unit test accuracy: X%
+- Number of tests added: N
+- Coverage items added: list
+
+## File Structure
+
+Typical domain structure:
+```
+domains/<domain>/
+  ├── grammars/
+  │   └── <domain>.jsgf
+  ├── canonicals/
+  │   └── <domain>_canonicals.txt
+  ├── tests/
+  │   └── <domain>_unit_tests.txt
+  ├── normalization/
+  │   └── <domain>_regex_rules.txt
+  └── README.md
+```
+
+## Tools and Commands
+
+### Grammar Expansion
+```bash
+cd domains/<domain>
+./scripts/expand_grammar.sh <domain>.jsgf
+```
+
+### Unit Testing
+```bash
+python scripts/run_unit_tests.py --domain <domain>
+python scripts/run_unit_tests.py --domain <domain> --filter <intent>
+```
+
+### Normalization Testing
+```bash
+python scripts/test_normalization.py --domain <domain>
+```
+
+### Interactive Testing
+```bash
+python scripts/interactive_test.py --domain <domain>
+```
+
+## Quality Standards
+
+- Grammar expansion must succeed (no syntax errors)
+- Unit test accuracy: >95%
+- Minimum test coverage: 15 utterances per intent
+- All new canonicals must have 3+ variations
+- Regex patterns must be tested before committing
+- No regressions in existing functionality
+
+## Common Pitfalls
+
+1. **Undefined non-terminals**: Always define before referencing
+2. **Missing canonicals**: Canonical references must exist
+3. **Incorrect escaping**: Escape special chars in regex
+4. **Over-broad patterns**: Test regex doesn't match too much
+5. **Insufficient test coverage**: Add diverse test cases
+6. **Breaking existing patterns**: Test for regressions
+
+## Best Practices
+
+- Read existing code before adding new code
+- Follow established patterns and naming conventions
+- Test incrementally (don't make all changes then test)
+- Add error handling for edge cases
+- Document unusual patterns or decisions
+- Keep grammar rules readable and maintainable
