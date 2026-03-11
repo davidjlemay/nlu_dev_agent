@@ -11,7 +11,7 @@ from core.dialect import DialectRegistry, EngineCapabilities
 from core.validator import validate_engine_capabilities
 
 FIXTURES = Path(__file__).parent / 'fixtures'
-DIALECT_JSON = Path(__file__).resolve().parent.parent / 'jsgf-dialect.json'
+DIALECT_JSON = FIXTURES / 'jsgf-dialect.json'
 
 
 def _make_dialect(**cap_kwargs) -> DialectRegistry:

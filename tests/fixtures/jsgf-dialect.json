@@ -1,0 +1,47 @@
+{
+  "engine": "test-engine",
+  "version": "1.0",
+  "capabilities": {
+    "flags": "both",
+    "allow_parameterized_rules": true
+  },
+  "lazy_loading": {
+    "lookup_limit": 50,
+    "expansion_limit": 200
+  },
+  "data_sources": {},
+  "flags": {
+    "allowed_types": ["string", "int", "float", "bool", "enum"],
+    "reserved_keys": ["intent", "slot", "min_conf", "requires_auth", "log_level"],
+    "allow_lhs": true
+  },
+  "functions": {
+    "normalise": {
+      "parameters": [
+        { "name": "value", "type": "rule_ref" },
+        { "name": "unit",  "type": "string"  }
+      ],
+      "return_type": "expansion"
+    },
+    "lookup": {
+      "parameters": [
+        { "name": "dict",   "type": "string" },
+        { "name": "locale", "type": "string", "optional": true }
+      ],
+      "return_type": "expansion"
+    },
+    "extract": {
+      "parameters": [
+        { "name": "source",   "type": "rule_ref" },
+        { "name": "type",     "type": "string"   },
+        { "name": "min_conf", "type": "float",    "optional": true }
+      ],
+      "return_type": "slot"
+    }
+  },
+  "reserved_rules": ["VOID", "NULL", "GARBAGE"],
+  "tag_extensions": {
+    "allow_multiline": true,
+    "value_interpolation": true
+  }
+}
