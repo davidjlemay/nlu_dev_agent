@@ -21,7 +21,11 @@ fi
 # Run from project root so .pi/ is discovered
 cd "${SCRIPT_DIR}"
 
-# Regenerate system prompt from dialect config
-"${SCRIPT_DIR}/.venv/bin/python3" "${SCRIPT_DIR}/scripts/render_pi_prompt.py"
+# Regenerate system prompt from dialect config (skip gracefully if venv absent)
+if [ -x "${SCRIPT_DIR}/.venv/bin/python3" ]; then
+    "${SCRIPT_DIR}/.venv/bin/python3" "${SCRIPT_DIR}/scripts/render_pi_prompt.py"
+else
+    echo "WARNING: .venv not found — using pre-rendered .pi/SYSTEM.md" >&2
+fi
 
 exec node "${PI}" "$@"

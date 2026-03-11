@@ -33,7 +33,7 @@
 
  %post
      apt-get update && apt-get install -y --no-install-recommends \
-         python3.12 python3.12-venv python3-pip python3.12-dev \
+         python3 python3-venv python3-dev python3-pip \
          git \
      && rm -rf /var/lib/apt/lists/*
 
@@ -49,14 +49,11 @@
 
  Note: The Python venv and project files are NOT baked in — they're bind-mounted from NFS at runtime. This keeps the SIF small and lets you update grammars/code without rebuilding.
 
- The venv needs to be built once on the cluster (or locally for the target arch):
- # On cluster after first transfer, in an interactive job:
- singularity exec nlu-agent.sif bash -c "
-   cd /scratch/$USER/nlu_dev_agent && \
-   python3.12 -m venv .venv && \
-   .venv/bin/pip install -e pyjsgf/ && \
-   .venv/bin/pip install pygls lsprotocol pyparsing six openai anthropic
- "
+ The venv needs to be built once on the cluster. Run the setup helper from an interactive job:
+     bash $PROJ/cluster/setup-venv.sh
+
+ This script uses `singularity exec --bind $PROJ:/app` so the venv lands at
+ $PROJ/.venv on the host filesystem.
 
  2. Build the SIF locally (three options, pick one)
 
