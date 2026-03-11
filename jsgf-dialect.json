@@ -13,6 +13,7 @@
   },
   "data_sources": {
     "bank_names": { "type": "file", "path": "nonterminals/bank_names.txt" },
+    "company_names": { "type": "file", "path": "nonterminals/company_names.txt" },
     "currencies":  { "type": "inline", "values": ["USD", "EUR", "GBP"] }
   },
   "flags": {

@@ -5,11 +5,13 @@ jsgf-generate: Generate a JSGF rule from a natural-language intent description.
 This is a thin wrapper over the agentic correction loop. It works with any
 OpenAI-compatible LLM provider (OpenAI, Anthropic, Ollama, OpenRouter, etc.).
 
-Configuration via environment variables:
-    LLM_BASE_URL   API base URL  (default: OpenAI; use https://api.anthropic.com/v1
-                   for Anthropic, http://localhost:11434/v1 for Ollama, etc.)
-    LLM_API_KEY    API key       (default: OPENAI_API_KEY)
-    LLM_MODEL      Default model (default: gpt-4o)
+Configuration (in priority order):
+    1. CLI args         --model, --base-url (highest priority)
+    2. LLM_* env vars   LLM_MODEL, LLM_BASE_URL, LLM_API_KEY
+    3. pi-mono config   .pi/settings.json (defaultModel/defaultProvider) +
+                        ~/.pi/agent/auth.json (api_key entries only)
+    4. Provider env     ANTHROPIC_API_KEY, OPENAI_API_KEY (implicit SDK fallback)
+    5. Built-in default gpt-4o-mini
 
 Usage:
     python generate.py <file.gram> \
@@ -41,6 +43,54 @@ from core.dialect import DialectRegistry
 from core.index import GrammarIndex
 from core.loader import DataLoader
 from agent.api import GrammarAgentAPI
+
+
+_PROVIDER_BASE_URL = {
+    'anthropic': 'https://api.anthropic.com/v1',
+    'openai': None,
+}
+
+
+def _resolve_pi_config(workspace: Path) -> tuple:
+    """Return (model, base_url, api_key) from pi-mono config, or (None, None, None).
+
+    Searches for .pi/settings.json by walking up from workspace, then reads
+    ~/.pi/agent/auth.json for the corresponding provider's API key.
+    OAuth entries are skipped (token refresh is non-trivial in Python).
+    """
+    # Walk up from workspace to find .pi/settings.json
+    settings_path = None
+    for parent in [workspace, *workspace.parents]:
+        candidate = parent / '.pi' / 'settings.json'
+        if candidate.exists():
+            settings_path = candidate
+            break
+
+    if settings_path is None:
+        return (None, None, None)
+
+    try:
+        settings = json.loads(settings_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return (None, None, None)
+
+    pi_model = settings.get('defaultModel') or None
+    provider = settings.get('defaultProvider') or None
+    pi_base_url = _PROVIDER_BASE_URL.get(provider) if provider else None
+
+    # Read API key from ~/.pi/agent/auth.json
+    pi_api_key = None
+    if provider:
+        auth_path = Path.home() / '.pi' / 'agent' / 'auth.json'
+        try:
+            auth = json.loads(auth_path.read_text())
+            entry = auth.get(provider, {})
+            if entry.get('type') == 'api_key':
+                pi_api_key = entry.get('key') or None
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    return (pi_model, pi_base_url, pi_api_key)
 
 
 def main():
@@ -84,9 +134,30 @@ def main():
         print(f"Error: Invalid --examples JSON: {e}", file=sys.stderr)
         sys.exit(1)
 
-    model = args.model or os.environ.get('LLM_MODEL', 'gpt-4o-mini')
+    # Priority: CLI args > LLM_* env vars > pi-mono config > provider env vars > defaults
+    model = args.model or os.environ.get('LLM_MODEL')
     base_url = args.base_url or os.environ.get('LLM_BASE_URL') or None
-    api_key = os.environ.get('LLM_API_KEY') or None  # falls back to OPENAI_API_KEY inside openai
+    api_key = os.environ.get('LLM_API_KEY') or None
+
+    # Fall through to pi-mono config for any values still unset
+    if not model or not api_key:
+        pi_model, pi_base_url, pi_api_key = _resolve_pi_config(workspace)
+        if not model:
+            model = pi_model
+        if not base_url:
+            base_url = pi_base_url
+        if not api_key:
+            api_key = pi_api_key
+
+    # Final default for model
+    if not model:
+        model = 'gpt-4o-mini'
+
+    # Explicit Anthropic key fallback (so ANTHROPIC_API_KEY is recognised without LLM_API_KEY)
+    if not api_key and not base_url:
+        api_key = os.environ.get('ANTHROPIC_API_KEY') or None
+        if api_key:
+            base_url = _PROVIDER_BASE_URL['anthropic']
 
     dialect_cfg = workspace / 'jsgf-dialect.json'
     dialect = (
