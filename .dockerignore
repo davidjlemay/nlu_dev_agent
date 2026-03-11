@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.git/
+pi-mono/.git/
+pi-mono/node_modules/
+*.sif
+*.zip
+nvim-linux-x86_64.tar.gz
