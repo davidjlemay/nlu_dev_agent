@@ -3,14 +3,14 @@
 jsgf-coverage: Check whether a JSGF rule matches a list of utterances.
 
 Usage:
-    python coverage.py <rule_name> <file.gram> --utterances '["hello", "hi"]'
-    python coverage.py <rule_name> <file.gram> --utterances-file utterances.txt
-    python coverage.py <rule_name> <file.gram> [--workspace <dir>]
+    python coverage.py <rule_name> <file.jsgf> --utterances '["hello", "hi"]'
+    python coverage.py <rule_name> <file.jsgf> --utterances-file utterances.txt
+    python coverage.py <rule_name> <file.jsgf> [--workspace <dir>]
 
 Outputs JSON to stdout:
     {
         "rule": "greeting",
-        "file": "path/to/file.gram",
+        "file": "path/to/file.jsgf",
         "coverage_ratio": 0.75,
         "covered": ["hello", "hi", "hey"],
         "uncovered": ["good morning"]
@@ -34,7 +34,7 @@ from agent.api import GrammarAgentAPI
 def main():
     parser = argparse.ArgumentParser(description='Check utterance coverage for a JSGF rule')
     parser.add_argument('rule', help='Rule name (without angle brackets)')
-    parser.add_argument('file', help='Path to the .gram file defining the rule')
+    parser.add_argument('file', help='Path to the .jsgf file defining the rule')
     parser.add_argument(
         '--utterances', '-u',
         help='JSON array of utterance strings',

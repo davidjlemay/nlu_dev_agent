@@ -3,11 +3,11 @@
 jsgf-validate: Validate a JSGF grammar file against the workspace index.
 
 Usage:
-    python validate.py <file.gram> [--workspace <dir>]
+    python validate.py <file.jsgf> [--workspace <dir>]
 
 Outputs JSON to stdout:
     {
-        "file": "path/to/file.gram",
+        "file": "path/to/file.jsgf",
         "valid": true,
         "diagnostics": [
             {
@@ -37,7 +37,7 @@ from core.validator import validate_dialect, validate_engine_capabilities
 
 def main():
     parser = argparse.ArgumentParser(description='Validate a JSGF grammar file')
-    parser.add_argument('file', help='Path to the .gram file to validate')
+    parser.add_argument('file', help='Path to the .jsgf file to validate')
     parser.add_argument(
         '--workspace', '-w',
         help='Workspace root (default: parent directory of file)',

@@ -23,7 +23,7 @@ def _make_dialect(**cap_kwargs) -> DialectRegistry:
 
 def _caps_diags(source: str, dialect: DialectRegistry, path: Path | None = None) -> list:
     """Parse *source* and return engine-capability diagnostics."""
-    p = path or Path('/tmp/test_caps.gram')
+    p = path or Path('/tmp/test_caps.jsgf')
     index = GrammarIndex(Path('/tmp'), dialect)
     index.update_file(p, source)
     doc = index._documents[p]
@@ -96,8 +96,8 @@ def test_max_public_rules_library_skipped():
     tmp = Path('/tmp')
     index = GrammarIndex(tmp, dialect)
 
-    lib_path = tmp / 'lib.gram'
-    root_path = tmp / 'root.gram'
+    lib_path = tmp / 'lib.jsgf'
+    root_path = tmp / 'root.jsgf'
 
     lib_source = """\
 #JSGF V1.0;
@@ -295,13 +295,13 @@ public <transfer[$from, $to]> = transfer $from to $to;
 
 
 # ------------------------------------------------------------------ #
-#  agreement.gram smoke test (existing fixture)                       #
+#  agreement.jsgf smoke test (existing fixture)                       #
 # ------------------------------------------------------------------ #
 
 def test_agreement_fixture_default_caps_clean():
-    """agreement.gram with permissive capabilities should produce no cap errors."""
+    """agreement.jsgf with permissive capabilities should produce no cap errors."""
     dialect = DialectRegistry.from_config(DIALECT_JSON)
-    path = FIXTURES / 'agreement.gram'
+    path = FIXTURES / 'agreement.jsgf'
     index = GrammarIndex(FIXTURES, dialect)
     index.update_file(path, path.read_text())
     doc = index._documents[path]
@@ -310,10 +310,10 @@ def test_agreement_fixture_default_caps_clean():
 
 
 def test_agreement_fixture_max_1_public_rule_fails():
-    """agreement.gram has 4 public rules; max_public_rules=1 should flag 3."""
+    """agreement.jsgf has 4 public rules; max_public_rules=1 should flag 3."""
     dialect = DialectRegistry.from_config(DIALECT_JSON)
     dialect.capabilities = EngineCapabilities(max_public_rules=1)
-    path = FIXTURES / 'agreement.gram'
+    path = FIXTURES / 'agreement.jsgf'
     index = GrammarIndex(FIXTURES, dialect)
     index.update_file(path, path.read_text())
     doc = index._documents[path]

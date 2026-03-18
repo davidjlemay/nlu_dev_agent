@@ -77,7 +77,7 @@
  # Azure OpenAI
  AZURE_OPENAI_BASE_URL=https://my-resource.openai.azure.com/ \
  AZURE_OPENAI_API_KEY=$KEY LLM_MODEL=my-deployment-name \
-     python generate.py grammars/transfer.gram --intent "..." --examples '[...]'
+     python generate.py grammars/transfer.jsgf --intent "..." --examples '[...]'
 
  Critical files
 
@@ -87,16 +87,16 @@
 
  # 1. Standard OpenAI — no regression
  LLM_API_KEY=test LLM_MODEL=gpt-4o python skills/jsgf-generate/generate.py \
-     grammars/test.gram --intent "test" --examples '["test"]' --max-iterations 1
+     grammars/test.jsgf --intent "test" --examples '["test"]' --max-iterations 1
 
  # 2. Azure via env vars (same vars pi-mono uses)
  AZURE_OPENAI_BASE_URL=https://my-resource.openai.azure.com/ \
  AZURE_OPENAI_API_KEY=$AZURE_KEY LLM_MODEL=my-gpt4o-deployment \
-     python skills/jsgf-generate/generate.py grammars/test.gram \
+     python skills/jsgf-generate/generate.py grammars/test.jsgf \
      --intent "greet user" --examples '["hello", "hi there"]'
 
  # 3. Azure via CLI args
- python skills/jsgf-generate/generate.py grammars/test.gram \
+ python skills/jsgf-generate/generate.py grammars/test.jsgf \
      --intent "greet" --examples '["hello"]' \
      --azure-endpoint https://my-resource.openai.azure.com/ \
      --model my-deployment --azure-api-version 2024-02-01
@@ -104,5 +104,5 @@
  # 4. Azure via pi-mono config (settings.json + env vars)
  # .pi/settings.json: {"defaultProvider":"azure-openai-responses","defaultModel":"my-deployment",...}
  # env: AZURE_OPENAI_BASE_URL=... AZURE_OPENAI_API_KEY=...
- python skills/jsgf-generate/generate.py grammars/test.gram \
+ python skills/jsgf-generate/generate.py grammars/test.jsgf \
      --intent "greet" --examples '["hello"]'

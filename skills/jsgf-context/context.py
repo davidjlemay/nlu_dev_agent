@@ -3,7 +3,7 @@
 jsgf-context: Get generation context for a target JSGF file.
 
 Usage:
-    python context.py <file.gram> --intent "Transfer funds" \
+    python context.py <file.jsgf> --intent "Transfer funds" \
         --examples '["transfer 100 to savings", "move money to chequing"]'
 
 Outputs JSON to stdout with:
@@ -29,7 +29,7 @@ from agent.api import GrammarAgentAPI
 
 def main():
     parser = argparse.ArgumentParser(description='Get generation context for a JSGF file')
-    parser.add_argument('file', help='Target .gram file (may not exist yet)')
+    parser.add_argument('file', help='Target .jsgf file (may not exist yet)')
     parser.add_argument('--intent', '-i', help='Natural language description of the intent', default='')
     parser.add_argument(
         '--examples', '-e',

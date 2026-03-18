@@ -6,18 +6,18 @@ Check whether a JSGF rule matches a list of test utterances.
 
 ```bash
 # Inline utterances (JSON array)
-python skills/jsgf-coverage/coverage.py greeting grammars/intents.gram \
+python skills/jsgf-coverage/coverage.py greeting grammars/intents.jsgf \
   --utterances '["hello", "hi", "good morning"]'
 
 # Utterances from a file (one per line)
-python skills/jsgf-coverage/coverage.py greeting grammars/intents.gram \
+python skills/jsgf-coverage/coverage.py greeting grammars/intents.jsgf \
   --utterances-file test/utterances/greeting.txt
 ```
 
 | Argument | Default | Description |
 |---|---|---|
 | `rule` | — | Rule name without `<>` |
-| `file` | — | Path to the `.gram` file |
+| `file` | — | Path to the `.jsgf` file |
 | `--utterances` | — | JSON array of utterance strings |
 | `--utterances-file` | — | Path to a file with one utterance per line |
 | `--workspace` | Parent dir of file | Workspace root |
@@ -27,7 +27,7 @@ python skills/jsgf-coverage/coverage.py greeting grammars/intents.gram \
 ```json
 {
   "rule": "greeting",
-  "file": "/path/to/intents.gram",
+  "file": "/path/to/intents.jsgf",
   "coverage_ratio": 0.67,
   "covered": ["hello", "hi"],
   "uncovered": ["good morning"]

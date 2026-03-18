@@ -9,9 +9,9 @@ SIF=/scratch/$USER/nlu-agent.sif
 
 # Usage: sbatch job-generate.sh <grammar_file> <intent> <examples_json>
 # Example:
-#   sbatch job-generate.sh grammars/intent.gram "transfer money" \
+#   sbatch job-generate.sh grammars/intent.jsgf "transfer money" \
 #     '["transfer 100 dollars", "send 50 to john"]'
-GRAMMAR=${1:-grammars/intent.gram}
+GRAMMAR=${1:-grammars/intent.jsgf}
 INTENT=${2:-"transfer money"}
 EXAMPLES=${3:-'["transfer 100 dollars"]'}
 

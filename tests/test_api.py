@@ -22,7 +22,7 @@ def _api() -> GrammarAgentAPI:
 
 def test_validate_coverage_full_match():
     api = _api()
-    shared = FIXTURES / 'shared.gram'
+    shared = FIXTURES / 'shared.jsgf'
     result = api.validate_coverage('currency', shared, ['dollars', 'euros', 'pounds'])
     assert result.coverage_ratio == 1.0
     assert result.uncovered == []
@@ -30,7 +30,7 @@ def test_validate_coverage_full_match():
 
 def test_validate_coverage_partial():
     api = _api()
-    shared = FIXTURES / 'shared.gram'
+    shared = FIXTURES / 'shared.jsgf'
     result = api.validate_coverage('currency', shared, ['dollars', 'yen'])
     assert result.coverage_ratio < 1.0
     assert 'yen' in result.uncovered
@@ -39,7 +39,7 @@ def test_validate_coverage_partial():
 
 def test_validate_coverage_rule_not_found():
     api = _api()
-    shared = FIXTURES / 'shared.gram'
+    shared = FIXTURES / 'shared.jsgf'
     result = api.validate_coverage('nonexistent', shared, ['test'])
     assert result.coverage_ratio == 0.0
     assert result.uncovered == ['test']
@@ -47,7 +47,7 @@ def test_validate_coverage_rule_not_found():
 
 def test_get_examples():
     api = _api()
-    shared = FIXTURES / 'shared.gram'
+    shared = FIXTURES / 'shared.jsgf'
     examples = api.get_examples('currency', shared, n=10)
     assert len(examples) > 0
     assert all(isinstance(e, str) for e in examples)
@@ -64,7 +64,7 @@ def test_find_rules_matching():
 
 def test_get_generation_context():
     api = _api()
-    transfer = FIXTURES / 'transfer.gram'
+    transfer = FIXTURES / 'transfer.jsgf'
     ctx = api.get_generation_context(
         transfer,
         'Transfer money between accounts',
@@ -77,13 +77,13 @@ def test_get_generation_context():
 
 def test_validate_generated_grammar_valid():
     api = _api()
-    target = FIXTURES / 'shared.gram'
+    target = FIXTURES / 'shared.jsgf'
     source = """\
 #JSGF V1.0;
 grammar com.example.test;
 public <yesno> = yes | no | maybe;
 """
-    diags, coverage = api.validate_generated_grammar(source, Path('/tmp/test.gram'), ['yes', 'no'])
+    diags, coverage = api.validate_generated_grammar(source, Path('/tmp/test.jsgf'), ['yes', 'no'])
     assert diags == []
     assert coverage is not None
     assert coverage.coverage_ratio == 1.0
@@ -97,7 +97,7 @@ grammar com.example.test;
 public <broken> = <undefinedRef>;
 """
     diags, coverage = api.validate_generated_grammar(
-        source, Path('/tmp/test_broken.gram'), ['test']
+        source, Path('/tmp/test_broken.jsgf'), ['test']
     )
     assert len(diags) > 0
     assert coverage is None
@@ -111,7 +111,7 @@ def test_validate_coverage_multi_variant():
     """Coverage unions across all LHS-flag variants of the same rule name."""
     dialect = DialectRegistry.standard()
     index = GrammarIndex(FIXTURES, dialect)
-    path = FIXTURES / 'noun_variants.gram'
+    path = FIXTURES / 'noun_variants.jsgf'
     index.update_file(path, path.read_text())
     api = GrammarAgentAPI(index)
 
@@ -126,7 +126,7 @@ def test_validate_coverage_pyjsgf_name_direct():
     """Looking up by mangled pyjsgf name returns only that specific variant."""
     dialect = DialectRegistry.standard()
     index = GrammarIndex(FIXTURES, dialect)
-    path = FIXTURES / 'noun_variants.gram'
+    path = FIXTURES / 'noun_variants.jsgf'
     index.update_file(path, path.read_text())
     api = GrammarAgentAPI(index)
 
@@ -159,7 +159,7 @@ def test_get_examples_with_lookup_returns_real_words():
 grammar test;
 public <check_balance> = balance of $lookup('banks');
 """
-    path = Path('/tmp/lookup_examples.gram')
+    path = Path('/tmp/lookup_examples.jsgf')
     loader = _make_loader(['td bank', 'rbc', 'cibc'], source_name='banks')
     api = _api_with_loader(source, path, loader)
     examples = api.get_examples('check_balance', path, n=10)
@@ -176,7 +176,7 @@ def test_validate_coverage_with_lookup_matches_loaded_items():
 grammar test;
 public <check_balance> = balance of $lookup('banks');
 """
-    path = Path('/tmp/lookup_coverage.gram')
+    path = Path('/tmp/lookup_coverage.jsgf')
     loader = _make_loader(['td bank', 'rbc', 'cibc'], source_name='banks')
     api = _api_with_loader(source, path, loader)
     result = api.validate_coverage(
@@ -196,7 +196,7 @@ def test_validate_coverage_lookup_full_coverage():
 grammar test;
 public <greet> = hello $lookup('names');
 """
-    path = Path('/tmp/lookup_full.gram')
+    path = Path('/tmp/lookup_full.jsgf')
     loader = _make_loader(['alice', 'bob'], source_name='names')
     api = _api_with_loader(source, path, loader)
     result = api.validate_coverage(
@@ -213,7 +213,7 @@ def test_get_examples_without_loader_returns_placeholder_token():
 grammar test;
 public <check_balance> = balance of $lookup('banks');
 """
-    path = Path('/tmp/no_loader.gram')
+    path = Path('/tmp/no_loader.jsgf')
     dialect = DialectRegistry.standard()
     index = GrammarIndex(FIXTURES, dialect)
     index.update_file(path, source)
@@ -232,7 +232,7 @@ def test_budget_limits_expansions():
 grammar test;
 public <items> = the ({alts});
 """
-    path = Path('/tmp/budget_test.gram')
+    path = Path('/tmp/budget_test.jsgf')
     loader = _make_loader([], source_name='x')
     # Override expansion_limit to 5
     loader._config = LazyLoadingConfig(lookup_limit=50, expansion_limit=5)

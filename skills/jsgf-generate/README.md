@@ -38,14 +38,14 @@ export LLM_API_KEY=$OPENROUTER_API_KEY
 ## Usage
 
 ```bash
-python skills/jsgf-generate/generate.py grammars/transfer.gram \
+python skills/jsgf-generate/generate.py grammars/transfer.jsgf \
   --intent "Transfer funds between accounts" \
   --examples '["transfer 100 to savings", "move fifty dollars to chequing"]'
 ```
 
 | Argument | Default | Description |
 |---|---|---|
-| `file` | — | Target `.gram` file to write |
+| `file` | — | Target `.jsgf` file to write |
 | `--intent` | — | Natural language intent description |
 | `--examples` | — | JSON array of required utterances (all must match) |
 | `--workspace` | Parent dir of file | Workspace root |
@@ -76,9 +76,9 @@ On success: generated grammar source is written to stdout (pipe to file with `>`
 Progress and error messages go to stderr.
 
 ```bash
-python skills/jsgf-generate/generate.py grammars/transfer.gram \
+python skills/jsgf-generate/generate.py grammars/transfer.jsgf \
   --intent "Transfer funds" \
-  --examples '["transfer 100"]' > grammars/transfer.gram
+  --examples '["transfer 100"]' > grammars/transfer.jsgf
 ```
 
 ## Notes

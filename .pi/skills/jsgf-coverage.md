@@ -10,11 +10,11 @@ Check utterance coverage for a JSGF rule from the command line.
 ## Usage
 
 ```bash
-.venv/bin/python3 skills/jsgf-coverage/coverage.py <rule> <file.gram> \
+.venv/bin/python3 skills/jsgf-coverage/coverage.py <rule> <file.jsgf> \
     --utterances '["utterance 1", "utterance 2"]'
 
 # Or from a file (one utterance per line)
-.venv/bin/python3 skills/jsgf-coverage/coverage.py <rule> <file.gram> \
+.venv/bin/python3 skills/jsgf-coverage/coverage.py <rule> <file.jsgf> \
     --utterances-file test/utterances.txt
 ```
 
@@ -22,11 +22,11 @@ Check utterance coverage for a JSGF rule from the command line.
 
 ```bash
 # Check inline utterances
-.venv/bin/python3 skills/jsgf-coverage/coverage.py greeting grammars/greeting.gram \
+.venv/bin/python3 skills/jsgf-coverage/coverage.py greeting grammars/greeting.jsgf \
     --utterances '["hello", "hi", "good morning"]'
 
 # Check from file
-.venv/bin/python3 skills/jsgf-coverage/coverage.py transfer grammars/transfer.gram \
+.venv/bin/python3 skills/jsgf-coverage/coverage.py transfer grammars/transfer.jsgf \
     --utterances-file tests/utterances/transfer.txt
 ```
 
@@ -35,7 +35,7 @@ Check utterance coverage for a JSGF rule from the command line.
 ```json
 {
   "rule": "greeting",
-  "file": "/path/to/greeting.gram",
+  "file": "/path/to/greeting.jsgf",
   "coverage_ratio": 0.67,
   "covered": ["hello", "hi"],
   "uncovered": ["good morning"]

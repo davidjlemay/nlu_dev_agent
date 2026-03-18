@@ -57,7 +57,7 @@ LLM_MODEL=my-cheaper-deployment python skills/jsgf-generate/generate.py ...
 
 ### Azure via CLI args (one-off)
 ```bash
-python skills/jsgf-generate/generate.py grammars/transfer.gram \
+python skills/jsgf-generate/generate.py grammars/transfer.jsgf \
     --intent "Transfer funds between accounts" \
     --examples '["transfer 100 to savings"]' \
     --azure-endpoint https://my-resource.openai.azure.com/ \
@@ -102,7 +102,7 @@ export LLM_API_KEY=sk-...
 ./pi.sh
 
 # generate (inherits from pi-mono config, or uses OPENAI_API_KEY implicitly)
-python skills/jsgf-generate/generate.py grammars/transfer.gram \
+python skills/jsgf-generate/generate.py grammars/transfer.jsgf \
     --intent "..." --examples '[...]'
 ```
 
@@ -128,7 +128,7 @@ LLM_MODEL=claude-haiku-4-5-20251001 python skills/jsgf-generate/generate.py ...
 Any OpenAI-compatible server:
 ```bash
 LLM_BASE_URL=http://localhost:11434/v1 LLM_API_KEY=ollama LLM_MODEL=llama3 \
-    python skills/jsgf-generate/generate.py grammars/transfer.gram \
+    python skills/jsgf-generate/generate.py grammars/transfer.jsgf \
     --intent "..." --examples '[...]'
 ```
 
@@ -163,7 +163,7 @@ export LLM_MODEL=gpt-4o-mini
 
 Or pass `--model` directly when calling generate:
 ```bash
-python skills/jsgf-generate/generate.py grammars/transfer.gram \
+python skills/jsgf-generate/generate.py grammars/transfer.jsgf \
     --model my-gpt4o-mini-deployment \
     --intent "..." --examples '[...]'
 ```

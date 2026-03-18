@@ -21,14 +21,14 @@ def _full_index() -> GrammarIndex:
 def test_index_workspace_finds_all_files():
     index = _full_index()
     paths = list(index._documents.keys())
-    assert any(p.name == 'shared.gram' for p in paths)
-    assert any(p.name == 'greeting.gram' for p in paths)
-    assert any(p.name == 'transfer.gram' for p in paths)
+    assert any(p.name == 'shared.jsgf' for p in paths)
+    assert any(p.name == 'greeting.jsgf' for p in paths)
+    assert any(p.name == 'transfer.jsgf' for p in paths)
 
 
 def test_resolve_rule_local():
     index = _full_index()
-    shared = FIXTURES / 'shared.gram'
+    shared = FIXTURES / 'shared.jsgf'
     loc = index.resolve_rule('cardinal', shared)
     assert loc is not None
     assert loc.file == shared
@@ -37,29 +37,29 @@ def test_resolve_rule_local():
 
 def test_resolve_rule_via_import():
     index = _full_index()
-    greeting = FIXTURES / 'greeting.gram'
-    # 'amount' is public in shared.gram, which greeting.gram imports
+    greeting = FIXTURES / 'greeting.jsgf'
+    # 'amount' is public in shared.jsgf, which greeting.jsgf imports
     loc = index.resolve_rule('amount', greeting)
     assert loc is not None
-    assert loc.file == FIXTURES / 'shared.gram'
+    assert loc.file == FIXTURES / 'shared.jsgf'
 
 
 def test_resolve_rule_not_found():
     index = _full_index()
-    shared = FIXTURES / 'shared.gram'
+    shared = FIXTURES / 'shared.jsgf'
     loc = index.resolve_rule('nonexistent', shared)
     assert loc is None
 
 
 def test_get_visible_rules_includes_imports():
     index = _full_index()
-    greeting = FIXTURES / 'greeting.gram'
+    greeting = FIXTURES / 'greeting.jsgf'
     visible = index.get_visible_rules(greeting)
     names = {loc.rule.name for loc in visible}
     # Local rules
     assert 'greeting' in names
     assert 'farewell' in names
-    # Imported rules (public from shared.gram)
+    # Imported rules (public from shared.jsgf)
     assert 'cardinal' in names
     assert 'amount' in names
 
@@ -72,24 +72,24 @@ def test_grammar_name_index():
 
 def test_find_references():
     index = _full_index()
-    # 'amount' is referenced in transfer.gram
+    # 'amount' is referenced in transfer.jsgf
     refs = index.find_references('amount')
     ref_files = {path.name for path, _ in refs}
-    assert 'transfer.gram' in ref_files
+    assert 'transfer.jsgf' in ref_files
 
 
 def test_update_file_returns_affected():
     index = _full_index()
-    shared = FIXTURES / 'shared.gram'
-    greeting = FIXTURES / 'greeting.gram'
-    # Updating shared.gram should affect greeting.gram (which imports it)
+    shared = FIXTURES / 'shared.jsgf'
+    greeting = FIXTURES / 'greeting.jsgf'
+    # Updating shared.jsgf should affect greeting.jsgf (which imports it)
     affected = index.update_file(shared, shared.read_text())
     assert greeting in affected
 
 
 def test_remove_file():
     index = _full_index()
-    shared = FIXTURES / 'shared.gram'
+    shared = FIXTURES / 'shared.jsgf'
     affected = index.remove_file(shared)
     assert shared not in index._documents
     assert 'com.example.shared' not in index._grammar_name_index
@@ -102,7 +102,7 @@ def test_remove_file():
 def test_resolve_rules_all_variants():
     dialect = DialectRegistry.standard()
     index = GrammarIndex(FIXTURES, dialect)
-    path = FIXTURES / 'noun_variants.gram'
+    path = FIXTURES / 'noun_variants.jsgf'
     index.update_file(path, path.read_text())
     locs = index.resolve_rules('noun', path)
     assert len(locs) == 2
@@ -114,7 +114,7 @@ def test_resolve_rules_all_variants():
 def test_resolve_rules_pyjsgf_name_lookup():
     dialect = DialectRegistry.standard()
     index = GrammarIndex(FIXTURES, dialect)
-    path = FIXTURES / 'noun_variants.gram'
+    path = FIXTURES / 'noun_variants.jsgf'
     index.update_file(path, path.read_text())
     locs = index.resolve_rules('noun__number_singular', path)
     assert len(locs) == 1
@@ -124,7 +124,7 @@ def test_resolve_rules_pyjsgf_name_lookup():
 def test_resolve_rules_single_unflagged_rule():
     dialect = DialectRegistry.standard()
     index = GrammarIndex(FIXTURES, dialect)
-    shared = FIXTURES / 'shared.gram'
+    shared = FIXTURES / 'shared.jsgf'
     index.update_file(shared, shared.read_text())
     locs = index.resolve_rules('cardinal', shared)
     assert len(locs) == 1

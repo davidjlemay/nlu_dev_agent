@@ -5,12 +5,12 @@ Validate a JSGF grammar file against the workspace index.
 ## Usage
 
 ```
-python skills/jsgf-validate/validate.py <file.gram> [--workspace <dir>]
+python skills/jsgf-validate/validate.py <file.jsgf> [--workspace <dir>]
 ```
 
 | Argument | Default | Description |
 |---|---|---|
-| `file` | — | Path to the `.gram` (or `.jsgf`) file to validate |
+| `file` | — | Path to the `.jsgf` (or `.jsgf`) file to validate |
 | `--workspace` | Parent dir of file | Workspace root; used to find other grammars and `jsgf-dialect.json` |
 
 ## Output
@@ -19,7 +19,7 @@ JSON on stdout:
 
 ```json
 {
-  "file": "/path/to/file.gram",
+  "file": "/path/to/file.jsgf",
   "valid": false,
   "diagnostics": [
     {

@@ -5,14 +5,14 @@ Get generation context for a target JSGF file before generating a new rule.
 ## Usage
 
 ```bash
-python skills/jsgf-context/context.py grammars/transfer.gram \
+python skills/jsgf-context/context.py grammars/transfer.jsgf \
   --intent "Transfer funds between accounts" \
   --examples '["transfer 100 to savings", "move money to chequing"]'
 ```
 
 | Argument | Default | Description |
 |---|---|---|
-| `file` | — | Target `.gram` file (need not exist yet) |
+| `file` | — | Target `.jsgf` file (need not exist yet) |
 | `--intent` | `""` | Natural language description of the intent |
 | `--examples` | `[]` | JSON array of example utterances |
 | `--workspace` | Parent dir of file | Workspace root |
@@ -24,7 +24,7 @@ python skills/jsgf-context/context.py grammars/transfer.gram \
   "existing_rules": [
     {
       "name": "amount",
-      "file": "/path/grammars/shared.gram",
+      "file": "/path/grammars/shared.jsgf",
       "visible": true,
       "dependencies": ["cardinal"],
       "dependents": [],
@@ -41,7 +41,7 @@ python skills/jsgf-context/context.py grammars/transfer.gram \
     }
   ],
   "similar_rules": [...],
-  "import_suggestions": ["/path/grammars/shared.gram"]
+  "import_suggestions": ["/path/grammars/shared.jsgf"]
 }
 ```
 

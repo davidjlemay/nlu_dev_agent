@@ -75,7 +75,7 @@
 
  # 1. Confirm existing LLM_* env vars still take priority
  LLM_API_KEY=test LLM_MODEL=gpt-4o python skills/jsgf-generate/generate.py \
-     grammars/test.gram --intent "test" --examples '["test"]' --max-iterations 1
+     grammars/test.jsgf --intent "test" --examples '["test"]' --max-iterations 1
 
  # 2. Set up a fake pi-mono config and confirm it's picked up
  mkdir -p /tmp/test-pi/.pi
@@ -84,7 +84,7 @@
  mkdir -p ~/.pi/agent
  echo '{"anthropic":{"type":"api_key","key":"'"$ANTHROPIC_API_KEY"'"}}' \
      > ~/.pi/agent/auth.json
- python skills/jsgf-generate/generate.py /tmp/test-pi/test.gram \
+ python skills/jsgf-generate/generate.py /tmp/test-pi/test.jsgf \
      --workspace /tmp/test-pi --intent "greet" --examples '["hello"]'
 
  # 3. Confirm OAuth entries are skipped gracefully (no crash)

@@ -16,22 +16,22 @@ Configuration (in priority order):
     5. Built-in default gpt-4o-mini
 
 Usage:
-    python generate.py <file.gram> \
+    python generate.py <file.jsgf> \
         --intent "Transfer funds between accounts" \
         --examples '["transfer 100 to savings", "move fifty dollars"]'
 
     # Anthropic
     LLM_BASE_URL=https://api.anthropic.com/v1 LLM_API_KEY=$ANTHROPIC_API_KEY \
-        python generate.py grammars/transfer.gram --model claude-opus-4-6 ...
+        python generate.py grammars/transfer.jsgf --model claude-opus-4-6 ...
 
     # Ollama (local)
     LLM_BASE_URL=http://localhost:11434/v1 LLM_API_KEY=ollama \
-        python generate.py grammars/transfer.gram --model llama3 ...
+        python generate.py grammars/transfer.jsgf --model llama3 ...
 
     # Azure OpenAI
     AZURE_OPENAI_BASE_URL=https://my-resource.openai.azure.com/ \
     AZURE_OPENAI_API_KEY=$KEY LLM_MODEL=my-deployment-name \
-        python generate.py grammars/transfer.gram --intent "..." --examples '[...]'
+        python generate.py grammars/transfer.jsgf --intent "..." --examples '[...]'
 
 Outputs the generated grammar source to stdout and validation results to stderr.
 """
@@ -124,7 +124,7 @@ def _resolve_pi_config(workspace: Path) -> tuple:
 
 def main():
     parser = argparse.ArgumentParser(description='Generate a JSGF rule from an intent description')
-    parser.add_argument('file', help='Target .gram file to write')
+    parser.add_argument('file', help='Target .jsgf file to write')
     parser.add_argument('--intent', '-i', required=True, help='Intent description')
     parser.add_argument(
         '--examples', '-e',

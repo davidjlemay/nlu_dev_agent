@@ -4,7 +4,7 @@
  * Registers three domain tools and one slash command that wire the agent
  * to the Python core layer (via CLI skills in skills/jsgf-*/):
  *
- *   jsgf_validate    — validate a .gram file; returns structured diagnostics
+ *   jsgf_validate    — validate a .jsgf file; returns structured diagnostics
  *   jsgf_coverage    — check utterance coverage for a named rule
  *   jsgf_context     — get generation context before writing a new rule
  *   /generate-intent — interactive command to generate a JSGF rule
@@ -46,7 +46,7 @@ Use this tool:
 
 Returns JSON: { file, valid, diagnostics: [{line, character, severity, message}] }`,
 		parameters: Type.Object({
-			file: Type.String({ description: "Path to the .gram file to validate (absolute or relative to cwd)" }),
+			file: Type.String({ description: "Path to the .jsgf file to validate (absolute or relative to cwd)" }),
 			workspace: Type.Optional(
 				Type.String({ description: "Workspace root directory (defaults to file's parent directory)" }),
 			),
@@ -90,7 +90,7 @@ Use this tool:
 Returns JSON: { rule, file, coverage_ratio, covered, uncovered }`,
 		parameters: Type.Object({
 			rule: Type.String({ description: "Rule name without angle brackets (e.g. 'greeting' not '<greeting>')" }),
-			file: Type.String({ description: "Path to the .gram file defining the rule" }),
+			file: Type.String({ description: "Path to the .jsgf file defining the rule" }),
 			utterances: Type.Array(Type.String(), {
 				description: "Utterances to test against the rule",
 			}),
@@ -135,7 +135,7 @@ reusable rules and dialect functions.
 
 Returns JSON: { existing_rules, dialect_functions, similar_rules, import_suggestions }`,
 		parameters: Type.Object({
-			file: Type.String({ description: "Target .gram file (need not exist yet)" }),
+			file: Type.String({ description: "Target .jsgf file (need not exist yet)" }),
 			intent: Type.String({ description: "Natural language description of the intent to implement" }),
 			examples: Type.Array(Type.String(), {
 				description: "Example utterances the new rule should match",
@@ -171,7 +171,7 @@ Returns JSON: { existing_rules, dialect_functions, similar_rules, import_suggest
 		handler: async (_args, ctx) => {
 			const targetFile = await ctx.ui.input(
 				"Target grammar file",
-				"e.g. grammars/transfer.gram",
+				"e.g. grammars/transfer.jsgf",
 			);
 			if (!targetFile) return;
 

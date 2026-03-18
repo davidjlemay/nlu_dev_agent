@@ -263,7 +263,7 @@
  validate_coverage returns 1.0 when utterance is in loaded set
  5. Smoke test (CLI):
  # With a grammar that uses $lookup('bank_names') and a data/bank_names.txt file:
- python skills/jsgf-coverage/coverage.py --grammar grammars/check_balance.gram \
+ python skills/jsgf-coverage/coverage.py --grammar grammars/check_balance.jsgf \
    --rule check_balance --utterances "td bank savings account"
  # Expect covered: ["td bank savings account"], ratio: 1.0
 

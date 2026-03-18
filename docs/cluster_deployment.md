@@ -104,7 +104,7 @@
    --env LLM_MODEL=claude-opus-4-6 \
    $SIF \
    /app/.venv/bin/python3 /app/skills/jsgf-generate/generate.py \
-     grammars/intent.gram \
+     grammars/intent.jsgf \
      --intent "transfer money" \
      --examples '["transfer 100 dollars", "send 50 to john"]' \
      --workspace /app/grammars/
@@ -158,7 +158,7 @@
  1. docker build -t nlu-agent:latest . — should succeed
  2. docker run --rm nlu-agent:latest node --version → v20.x
  3. docker run --rm nlu-agent:latest .venv/bin/python3 -c "import pyjsgf; print('ok')" → ok
- 4. docker run --rm -e ANTHROPIC_API_KEY=... nlu-agent:latest python3 skills/jsgf-validate/validate.py grammars/test.gram --workspace grammars/ → JSON output
+ 4. docker run --rm -e ANTHROPIC_API_KEY=... nlu-agent:latest python3 skills/jsgf-validate/validate.py grammars/test.jsgf --workspace grammars/ → JSON output
  5. Convert to SIF and repeat tests with singularity exec
 
  Confirmed constraints

@@ -37,7 +37,7 @@ Plan: Rule name mangling for LHS agreement variants
  ├───────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────┤
  │ agent/api.py                      │ validate_coverage() unions coverage across all variants                                           │
  ├───────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────┤
- │ tests/fixtures/noun_variants.gram │ New fixture with two <noun> variants                                                              │
+ │ tests/fixtures/noun_variants.jsgf │ New fixture with two <noun> variants                                                              │
  ├───────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────┤
  │ tests/test_document.py            │ New mangling + variant tests                                                                      │
  ├───────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────┤
@@ -205,7 +205,7 @@ Plan: Rule name mangling for LHS agreement variants
  Extract _try_match(rule_obj, u) → bool as a local helper that wraps the existing
  try/except RecursionError guard.
 
- New fixture: tests/fixtures/noun_variants.gram
+ New fixture: tests/fixtures/noun_variants.jsgf
 
  #JSGF V1.0;
  grammar com.example.nounvariants;
@@ -250,6 +250,6 @@ Plan: Rule name mangling for LHS agreement variants
  # Expect 52 existing + ~18 new = ~70 tests, all passing
 
  Smoke-test the CLI skill:
- .venv/bin/python3 skills/jsgf-coverage/coverage.py noun tests/fixtures/noun_variants.gram \
+ .venv/bin/python3 skills/jsgf-coverage/coverage.py noun tests/fixtures/noun_variants.jsgf \
      --utterances '["book", "cats", "elephant"]'
  # Expected: coverage_ratio: 0.67, covered: [book, cats], uncovered: [elephant]

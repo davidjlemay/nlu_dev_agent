@@ -50,8 +50,8 @@ class GrammarIndex:
     # ------------------------------------------------------------------ #
 
     def index_workspace(self) -> None:
-        """Scan workspace root for all .gram / .jsgf files and index them."""
-        for ext in ('*.gram', '*.jsgf', '*.jgram'):
+        """Scan workspace root for all .jsgf / .jsgf files and index them."""
+        for ext in ('*.jsgf', '*.jsgf', '*.jgram'):
             for path in self.root.rglob(ext):
                 try:
                     self.update_file(path, path.read_text(encoding='utf-8'))

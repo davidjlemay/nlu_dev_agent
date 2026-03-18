@@ -14,7 +14,7 @@ DIALECT_JSON = Path(__file__).resolve().parent.parent / 'jsgf-dialect.json'
 
 
 def _diags(source: str, dialect: DialectRegistry) -> list:
-    path = Path('/tmp/test_validator.gram')
+    path = Path('/tmp/test_validator.jsgf')
     index = GrammarIndex(Path('/tmp'), dialect)
     index.update_file(path, source)
     doc = index._documents[path]
@@ -131,7 +131,7 @@ public <item> {number:enum=singular} = book {intent:string=pick_item};
 
 def test_agreement_fixture_valid():
     dialect = DialectRegistry.from_config(DIALECT_JSON)
-    path = FIXTURES / 'agreement.gram'
+    path = FIXTURES / 'agreement.jsgf'
     index = GrammarIndex(FIXTURES, dialect)
     index.update_file(path, path.read_text())
     doc = index._documents[path]
@@ -143,7 +143,7 @@ def test_agreement_fixture_valid():
 
 def test_agreement_fixture_parses_four_rules():
     dialect = DialectRegistry.from_config(DIALECT_JSON)
-    path = FIXTURES / 'agreement.gram'
+    path = FIXTURES / 'agreement.jsgf'
     doc = GrammarDocument.parse(path, path.read_text())
     assert doc.parse_error is None
     assert len(doc.rules) == 4
@@ -205,9 +205,9 @@ public <bad_booking> = <date_range[<dep>]>;
 
 
 def test_parameterized_fixture_no_arity_errors():
-    """The parameterized.gram fixture should have no arity errors."""
+    """The parameterized.jsgf fixture should have no arity errors."""
     dialect = DialectRegistry.from_config(DIALECT_JSON)
-    path = FIXTURES / 'parameterized.gram'
+    path = FIXTURES / 'parameterized.jsgf'
     index = GrammarIndex(FIXTURES, dialect)
     index.update_file(path, path.read_text())
     doc = index._documents[path]

@@ -98,7 +98,7 @@
 │ - Scan source for all parameterized call sites in bodies: <name[...]> not before = → name → arg_count at each occurrence                                                                                     │
 │ - Report arity mismatches as DiagnosticSeverity.Error                                                                                                                                                        │
 │                                                                                                                                                                                                              │
-│ tests/fixtures/parameterized.gram (new)                                                                                                                                                                      │
+│ tests/fixtures/parameterized.jsgf (new)                                                                                                                                                                      │
 │                                                                                                                                                                                                              │
 │ #JSGF V1.0;                                                                                                                                                                                                  │
 │ grammar com.example.parameterized;                                                                                                                                                                           │
@@ -123,7 +123,7 @@
 │ - test_parameterized_flagged_ref_resolves — <transfer[<a>, <b>]> {currency:enum=usd} in body → resolved to <transfer__currency_usd>                                                                          │
 │ - test_parameterized_unflagged_call_site_strips_args — <date_range[<dep>, <ret>]> in body → pyjsgf sees <date_range>                                                                                         │
 │ - test_dollar_param_in_body_becomes_placeholder — $from in body → PARAM literal (pyjsgf can parse)                                                                                                           │
-│ - test_parameterized_fixture_parses_ok — parameterized.gram → no parse error, expected rule names                                                                                                            │
+│ - test_parameterized_fixture_parses_ok — parameterized.jsgf → no parse error, expected rule names                                                                                                            │
 │                                                                                                                                                                                                              │
 │ tests/test_validator.py — new test cases                                                                                                                                                                     │
 │                                                                                                                                                                                                              │
@@ -140,10 +140,10 @@
 │ pytest tests/ -v                                                                                                                                                                                             │
 │                                                                                                                                                                                                              │
 │ # Smoke-test with pi skills on new fixture                                                                                                                                                                   │
-│ ./pi.sh run 'validate the grammar tests/fixtures/parameterized.gram'                                                                                                                                         │
-│ ./pi.sh run 'show coverage for tests/fixtures/parameterized.gram'                                                                                                                                            │
+│ ./pi.sh run 'validate the grammar tests/fixtures/parameterized.jsgf'                                                                                                                                         │
+│ ./pi.sh run 'show coverage for tests/fixtures/parameterized.jsgf'                                                                                                                                            │
 │                                                                                                                                                                                                              │
-│ Expected: 52 existing tests still pass + ~10 new tests pass, no parse errors on parameterized.gram, validator reports arity errors correctly.
+│ Expected: 52 existing tests still pass + ~10 new tests pass, no parse errors on parameterized.jsgf, validator reports arity errors correctly.
 
   Summary
 
@@ -170,6 +170,6 @@
 
   New fixtures and tests
 
-  - tests/fixtures/parameterized.gram: Fixture with flagged/unflagged parameterized rules and call sites.
+  - tests/fixtures/parameterized.jsgf: Fixture with flagged/unflagged parameterized rules and call sites.
   - 13 new tests in test_document.py (custom functions + LHS flags, parameterized rules).
   - 4 new tests in test_validator.py (arity ok, arity mismatch, unflagged mismatch, fixture validation). 

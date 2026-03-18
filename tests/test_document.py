@@ -22,7 +22,7 @@ def _make_index(*gram_files: Path) -> GrammarIndex:
 
 
 def test_parse_valid_grammar():
-    path = FIXTURES / 'shared.gram'
+    path = FIXTURES / 'shared.jsgf'
     doc = GrammarDocument.parse(path, path.read_text())
     assert doc.parse_error is None
     assert doc.grammar_name == 'com.example.shared'
@@ -32,14 +32,14 @@ def test_parse_valid_grammar():
 
 
 def test_parse_detects_rule_visibility():
-    path = FIXTURES / 'shared.gram'
+    path = FIXTURES / 'shared.jsgf'
     doc = GrammarDocument.parse(path, path.read_text())
     for rule in doc.rules:
-        assert rule.visible is True  # all rules in shared.gram are public
+        assert rule.visible is True  # all rules in shared.jsgf are public
 
 
 def test_parse_with_imports():
-    path = FIXTURES / 'greeting.gram'
+    path = FIXTURES / 'greeting.jsgf'
     doc = GrammarDocument.parse(path, path.read_text())
     assert doc.parse_error is None
     assert len(doc.imports) == 1
@@ -49,8 +49,8 @@ def test_parse_with_imports():
 
 
 def test_diagnostics_no_errors_valid_workspace():
-    shared = FIXTURES / 'shared.gram'
-    greeting = FIXTURES / 'greeting.gram'
+    shared = FIXTURES / 'shared.jsgf'
+    greeting = FIXTURES / 'greeting.jsgf'
     index = _make_index(shared, greeting)
     doc = index._documents[greeting]
     diags = doc.get_diagnostics(index)
@@ -65,7 +65,7 @@ def test_diagnostics_undefined_rule():
 grammar test;
 public <broken> = <undefinedRule>;
 """
-    path = Path('/tmp/test_broken.gram')
+    path = Path('/tmp/test_broken.jsgf')
     dialect = DialectRegistry.standard()
     index = GrammarIndex(Path('/tmp'), dialect)
     doc = index.update_file(path, source)
@@ -77,7 +77,7 @@ public <broken> = <undefinedRule>;
 
 
 def test_resilient_parse_on_broken_grammar():
-    path = FIXTURES / 'broken.gram'
+    path = FIXTURES / 'broken.jsgf'
     doc = GrammarDocument.parse(path, path.read_text())
     # Should have a parse error but still recover rule names
     assert doc.parse_error is not None
@@ -93,7 +93,7 @@ grammar test;
 public <item_singular> {number:enum=singular} = book | pen;
 public <item_plural>   {number:enum=plural}   = books | pens;
 """
-    path = FIXTURES / 'agreement.gram'
+    path = FIXTURES / 'agreement.jsgf'
     doc = GrammarDocument.parse(path, path.read_text())
     assert doc.parse_error is None
     assert 'item_singular' in doc.rule_names()
@@ -108,7 +108,7 @@ grammar test;
 public <item> {number:enum=singular} = book;
 """
     from pathlib import Path as _Path
-    doc = GrammarDocument.parse(_Path('/tmp/t.gram'), source)
+    doc = GrammarDocument.parse(_Path('/tmp/t.jsgf'), source)
     assert doc.parse_error is None
     pos = doc.def_positions.get('item')
     assert pos is not None
@@ -124,7 +124,7 @@ grammar test;
 public <item> {number:enum=singular} = book | pen;
 """
     from pathlib import Path as _Path
-    doc = GrammarDocument.parse(_Path('/tmp/t.gram'), source)
+    doc = GrammarDocument.parse(_Path('/tmp/t.jsgf'), source)
     assert doc.parse_error is None
     rule = doc.get_rule('item')
     assert rule is not None
@@ -219,13 +219,13 @@ public <sentence> = I read <noun> {number:enum=dual};
 
 
 def test_same_name_variants_parse_successfully():
-    path = FIXTURES / 'noun_variants.gram'
+    path = FIXTURES / 'noun_variants.jsgf'
     doc = GrammarDocument.parse(path, path.read_text())
     assert doc.parse_error is None
 
 
 def test_same_name_variants_pyjsgf_names():
-    path = FIXTURES / 'noun_variants.gram'
+    path = FIXTURES / 'noun_variants.jsgf'
     doc = GrammarDocument.parse(path, path.read_text())
     pyjsgf_names = [r.pyjsgf_name for r in doc.rules]
     assert 'noun__number_singular' in pyjsgf_names
@@ -233,7 +233,7 @@ def test_same_name_variants_pyjsgf_names():
 
 
 def test_same_name_variants_original_names_preserved():
-    path = FIXTURES / 'noun_variants.gram'
+    path = FIXTURES / 'noun_variants.jsgf'
     doc = GrammarDocument.parse(path, path.read_text())
     for rule in doc.rules:
         assert rule.name == 'noun'
@@ -242,7 +242,7 @@ def test_same_name_variants_original_names_preserved():
 def test_same_name_variants_no_duplicate_diagnostic():
     dialect = DialectRegistry.standard()
     index = GrammarIndex(FIXTURES, dialect)
-    path = FIXTURES / 'noun_variants.gram'
+    path = FIXTURES / 'noun_variants.jsgf'
     index.update_file(path, path.read_text())
     doc = index._documents[path]
     diags = doc.get_diagnostics(index)
@@ -260,7 +260,7 @@ public <noun> {number:enum=singular} = cat;
 """
     dialect = DialectRegistry.standard()
     index = GrammarIndex(Path('/tmp'), dialect)
-    path = Path('/tmp/dup_test.gram')
+    path = Path('/tmp/dup_test.jsgf')
     index.update_file(path, source)
     doc = index._documents[path]
     diags = doc.get_diagnostics(index)
@@ -269,7 +269,7 @@ public <noun> {number:enum=singular} = cat;
 
 
 def test_pyjsgf_def_positions_per_variant():
-    path = FIXTURES / 'noun_variants.gram'
+    path = FIXTURES / 'noun_variants.jsgf'
     doc = GrammarDocument.parse(path, path.read_text())
     pos_singular = doc.pyjsgf_def_positions.get('noun__number_singular')
     pos_plural = doc.pyjsgf_def_positions.get('noun__number_plural')
@@ -279,7 +279,7 @@ def test_pyjsgf_def_positions_per_variant():
 
 
 def test_get_rule_by_pyjsgf_name():
-    path = FIXTURES / 'noun_variants.gram'
+    path = FIXTURES / 'noun_variants.jsgf'
     doc = GrammarDocument.parse(path, path.read_text())
     rule = doc.get_rule('noun__number_plural')
     assert rule is not None
@@ -295,7 +295,7 @@ grammar test;
 public <item> {number:enum=singular} = book | pen;
 INVALID JSGF SYNTAX !!!
 """
-    doc = GrammarDocument.parse(Path('/tmp/resilient_pyjsgf_name.gram'), source)
+    doc = GrammarDocument.parse(Path('/tmp/resilient_pyjsgf_name.jsgf'), source)
     # Resilient parse was used (source has invalid syntax after the rule)
     rule = doc.get_rule('item')
     assert rule is not None
@@ -314,7 +314,7 @@ grammar test;
 public <price> {currency:enum=usd} = $normalise(<cardinal>, 'USD');
 public <cardinal> = one | two | three;
 """
-    doc = GrammarDocument.parse(Path('/tmp/func_lhs.gram'), source)
+    doc = GrammarDocument.parse(Path('/tmp/func_lhs.jsgf'), source)
     assert doc.parse_error is None
     rule = doc.get_rule('price')
     assert rule is not None
@@ -360,7 +360,7 @@ def test_parameterized_decl_strips_params_for_pyjsgf():
 grammar test;
 public <date_range[$start, $end]> = from $start to $end;
 """
-    doc = GrammarDocument.parse(Path('/tmp/param_strip.gram'), source)
+    doc = GrammarDocument.parse(Path('/tmp/param_strip.jsgf'), source)
     assert doc.parse_error is None
     assert 'date_range' in doc.rule_names()
 
@@ -372,7 +372,7 @@ def test_parameterized_with_lhs_flag_mangles_name():
 grammar test;
 public <transfer[$from, $to]> {currency:enum=usd} = transfer $from to $to in dollars;
 """
-    doc = GrammarDocument.parse(Path('/tmp/param_mangle.gram'), source)
+    doc = GrammarDocument.parse(Path('/tmp/param_mangle.jsgf'), source)
     assert doc.parse_error is None
     rule = doc.get_rule('transfer')
     assert rule is not None
@@ -392,7 +392,7 @@ public <savings> = savings account;
 public <chequing> = chequing account;
 public <my_transfer> = <transfer[<savings>, <chequing>]> {currency:enum=usd};
 """
-    doc = GrammarDocument.parse(Path('/tmp/param_ref.gram'), source)
+    doc = GrammarDocument.parse(Path('/tmp/param_ref.jsgf'), source)
     assert doc.parse_error is None
     mangled, _, _ = _mangle_source(source)
     body = mangled.split('<my_transfer>')[1]
@@ -409,7 +409,7 @@ public <departure> = departure date;
 public <return> = return date;
 public <booking> = <date_range[<departure>, <return>]>;
 """
-    doc = GrammarDocument.parse(Path('/tmp/param_unflagged.gram'), source)
+    doc = GrammarDocument.parse(Path('/tmp/param_unflagged.jsgf'), source)
     assert doc.parse_error is None
     assert 'booking' in doc.rule_names()
 
@@ -430,8 +430,8 @@ public <date_range[$start, $end]> = from $start to $end;
 
 
 def test_parameterized_fixture_parses_ok():
-    """The parameterized.gram fixture should parse without error."""
-    path = FIXTURES / 'parameterized.gram'
+    """The parameterized.jsgf fixture should parse without error."""
+    path = FIXTURES / 'parameterized.jsgf'
     doc = GrammarDocument.parse(path, path.read_text())
     assert doc.parse_error is None, f"Parse error: {doc.parse_error}"
     names = doc.rule_names()
@@ -448,7 +448,7 @@ def test_parameterized_rule_params_populated():
 grammar test;
 public <transfer[$from, $to]> {currency:enum=usd} = transfer $from to $to;
 """
-    doc = GrammarDocument.parse(Path('/tmp/param_params.gram'), source)
+    doc = GrammarDocument.parse(Path('/tmp/param_params.jsgf'), source)
     rule = doc.get_rule('transfer')
     assert rule is not None
     assert rule.params == ['from', 'to']
@@ -462,7 +462,7 @@ grammar test;
 public <transfer[$from, $to]> {currency:enum=usd} = transfer $from to $to;
 INVALID SYNTAX !!!
 """
-    doc = GrammarDocument.parse(Path('/tmp/param_resilient.gram'), source)
+    doc = GrammarDocument.parse(Path('/tmp/param_resilient.jsgf'), source)
     # Should have fallen back to resilient parse
     assert doc.parse_error is not None
     rule = doc.get_rule('transfer')
@@ -482,7 +482,7 @@ def test_func_placeholders_populated():
 grammar test;
 public <check_balance> = balance of $lookup('bank_names');
 """
-    doc = GrammarDocument.parse(Path('/tmp/func_plhdr.gram'), source)
+    doc = GrammarDocument.parse(Path('/tmp/func_plhdr.jsgf'), source)
     assert doc.parse_error is None
     assert len(doc.func_placeholders) == 1
     token, info = next(iter(doc.func_placeholders.items()))
@@ -499,7 +499,7 @@ def test_func_placeholders_indexed():
 grammar test;
 public <transfer> = from $lookup('banks') to $lookup('banks');
 """
-    doc = GrammarDocument.parse(Path('/tmp/multi_plhdr.gram'), source)
+    doc = GrammarDocument.parse(Path('/tmp/multi_plhdr.jsgf'), source)
     assert doc.parse_error is None
     assert len(doc.func_placeholders) == 2
     tokens = set(doc.func_placeholders.keys())
@@ -517,7 +517,7 @@ public <savings> = savings;
 public <chequing> = chequing;
 public <my_transfer> = <transfer[<savings>, <chequing>]>;
 """
-    doc = GrammarDocument.parse(Path('/tmp/call_sites.gram'), source)
+    doc = GrammarDocument.parse(Path('/tmp/call_sites.jsgf'), source)
     assert doc.parse_error is None
     sites = doc.param_call_sites.get('transfer', [])
     assert len(sites) >= 1

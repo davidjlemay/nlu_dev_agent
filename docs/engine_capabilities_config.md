@@ -119,7 +119,7 @@
  2. Add a test with $lookup(...) → confirm diagnostic fires when allowed_functions=[]
  3. Add a test with RHS tags → confirm diagnostic fires when flags="lhs_only"
  4. Confirm existing 111 tests still pass (defaults are permissive, no regressions)
- 5. Run skills/jsgf-validate/validate.py smoke test on tests/fixtures/agreement.gram 
+ 5. Run skills/jsgf-validate/validate.py smoke test on tests/fixtures/agreement.jsgf 
 
 
 Here's a summary of what was implemented:
@@ -137,4 +137,4 @@ Here's a summary of what was implemented:
 
   jsgf-dialect.json — Added "capabilities" section with permissive defaults (no behavior change for existing engine).
 
-  tests/test_engine_capabilities.py — 19 new tests covering all constraint types, the library-skip logic, and the agreement.gram fixture. All 130 tests pass.
+  tests/test_engine_capabilities.py — 19 new tests covering all constraint types, the library-skip logic, and the agreement.jsgf fixture. All 130 tests pass.
