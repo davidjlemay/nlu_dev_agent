@@ -51,12 +51,18 @@ class GrammarIndex:
 
     def index_workspace(self) -> None:
         """Scan workspace root for all .jsgf / .jsgf files and index them."""
-        for ext in ('*.jsgf', '*.jsgf', '*.jgram'):
+        for ext in ('*.jsgf', '*.jgram'):
             for path in self.root.rglob(ext):
                 try:
                     self.update_file(path, path.read_text(encoding='utf-8'))
                 except OSError:
                     pass
+        # Second pass: rebuild import edges now that all grammar names are known,
+        # then pre-resolve imports so Rule.matches() works across files.
+        for path, doc in list(self._documents.items()):
+            self._update_import_graph(path, doc)
+        for doc in self._documents.values():
+            self.pre_resolve_grammar_imports(doc)
 
     # ------------------------------------------------------------------ #
     #  Incremental updates                                                 #
@@ -209,6 +215,54 @@ class GrammarIndex:
             doc.pyjsgf_grammar.resolve_imports(memo)
         except Exception:
             pass  # Best-effort; unresolvable imports are reported as diagnostics
+        self._inject_original_name_aliases(doc)
+
+    def _inject_original_name_aliases(self, doc: 'GrammarDocument') -> None:
+        """Inject alias Rule objects into *doc*'s pyjsgf grammar for any imported
+        rules that have been name-mangled due to LHS flags, so that NamedRuleRef
+        expansions that reference the original name resolve correctly during
+        Rule.matches().
+
+        Name collisions (local rule shadows imported original name) are silently
+        skipped here; they are reported as LSP Warning diagnostics by
+        ``validate_import_aliases`` in ``core/validator.py``.
+        """
+        try:
+            from jsgf import Rule as PyjsgfRule
+        except ImportError:
+            return
+
+        grammar = doc.pyjsgf_grammar
+        if grammar is None:
+            return
+
+        existing_names: set[str] = {r.name for r in grammar._rules}
+
+        for imp_path in self._imports.get(doc.path, set()):
+            imp_doc = self._documents.get(imp_path)
+            if imp_doc is None or imp_doc.pyjsgf_grammar is None:
+                continue
+
+            for rule_info in imp_doc.rules:
+                if rule_info.pyjsgf_name == rule_info.name:
+                    continue  # Not mangled; standard import resolution handles it
+                if rule_info.grammar_object is None:
+                    continue
+                if rule_info.name in existing_names:
+                    continue  # Collision — reported as LSP diagnostic elsewhere
+
+                orig_rule = rule_info.grammar_object
+                try:
+                    copied_exp = orig_rule.expansion.copy(shallow=False)
+                except Exception:
+                    continue
+
+                alias = PyjsgfRule(rule_info.name, rule_info.visible, copied_exp)
+                # Point grammar to the source grammar so inner NamedRuleRef nodes
+                # within the expansion still resolve against the source grammar.
+                alias.grammar = imp_doc.pyjsgf_grammar
+                grammar._rules.append(alias)
+                existing_names.add(rule_info.name)
 
     def is_library(self, path: Path) -> bool:
         """Return True if *path* is imported by at least one other document."""

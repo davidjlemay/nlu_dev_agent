@@ -311,6 +311,54 @@ def validate_engine_capabilities(
     return diags
 
 
+def validate_import_aliases(
+    doc: GrammarDocument,
+    index: 'GrammarIndex',
+) -> list[lsp.Diagnostic]:
+    """Return diagnostics for cross-file LHS-flag name collisions.
+
+    When an imported grammar has a rule with an LHS flag (e.g.
+    ``account_type {slot:string=account_type}``), its pyjsgf name is mangled
+    (``account_type__slot_account_type``).  We inject an alias Rule under the
+    original name so that cross-file ``Rule.matches()`` works.  If the importing
+    grammar already has a local rule with the same original name, the alias
+    cannot be injected and matching will silently fail — raise a Warning
+    diagnostic to surface this.
+    """
+    diags: list[lsp.Diagnostic] = []
+    local_names = {r.name for r in doc.rules}
+
+    for imp in doc.imports:
+        imp_path = index._grammar_name_index.get(imp.grammar_name)
+        if imp_path is None:
+            continue
+        imp_doc = index._documents.get(imp_path)
+        if imp_doc is None:
+            continue
+
+        for rule_info in imp_doc.rules:
+            if rule_info.pyjsgf_name == rule_info.name:
+                continue  # Not mangled — no alias needed
+            if not rule_info.visible:
+                continue
+            if rule_info.name not in local_names:
+                continue  # No collision
+
+            diags.append(lsp.Diagnostic(
+                range=_pos_to_range(imp.position, len(imp.name) + 2),
+                message=(
+                    f"Import conflict: '{rule_info.name}' is declared locally and "
+                    f"also imported from '{imp.grammar_name}' as a LHS-flag variant "
+                    f"('{rule_info.pyjsgf_name}'). Cross-file matching for "
+                    f"'{rule_info.name}' may not work correctly."
+                ),
+                severity=lsp.DiagnosticSeverity.Warning,
+                source='jsgf-lsp',
+            ))
+
+    return diags
+
+
 def _line_offsets(source: str) -> list[int]:
     offsets = [0]
     for i, ch in enumerate(source):

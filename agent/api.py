@@ -280,11 +280,12 @@ class GrammarAgentAPI:
         Returns (diagnostics, coverage_result).
         coverage_result is None if there are parse errors.
         """
-        from core.validator import validate_dialect, validate_engine_capabilities
+        from core.validator import validate_dialect, validate_engine_capabilities, validate_import_aliases
         doc = GrammarDocument.parse(target_file, source)
         diags = doc.get_diagnostics(self.index)
         diags += validate_dialect(doc, self.index.dialect)
         diags += validate_engine_capabilities(doc, self.index.dialect, self.index)
+        diags += validate_import_aliases(doc, self.index)
         if diags:
             return diags, None
 
