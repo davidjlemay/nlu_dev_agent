@@ -103,7 +103,7 @@ def _resolve_pi_config(workspace: Path) -> tuple:
                     pi_api_key = entry.get('key') or None
             except (json.JSONDecodeError, OSError):
                 pass
-        return (pi_model, None, pi_api_key, azure_endpoint, api_version)
+        return (pi_model, None, pi_api_key, azure_endpoint, api_version, True)
 
     pi_base_url = _PROVIDER_BASE_URL.get(provider) if provider else None
 
@@ -119,7 +119,7 @@ def _resolve_pi_config(workspace: Path) -> tuple:
         except (json.JSONDecodeError, OSError):
             pass
 
-    return (pi_model, pi_base_url, pi_api_key, None, None)
+    return (pi_model, pi_base_url, pi_api_key, None, None, False)
 
 
 def main():
@@ -179,12 +179,13 @@ def main():
     api_key = os.environ.get('LLM_API_KEY') or None
     azure_endpoint = args.azure_endpoint or os.environ.get('AZURE_OPENAI_BASE_URL') or None
     api_version = args.azure_api_version or os.environ.get('AZURE_OPENAI_API_VERSION') or None
+    use_responses_api = os.environ.get('LLM_API_STYLE') == 'responses'
     if not api_key and azure_endpoint:
         api_key = os.environ.get('AZURE_OPENAI_API_KEY') or None
 
     # Fall through to pi-mono config for any values still unset
     if not model or not api_key:
-        pi_model, pi_base_url, pi_api_key, pi_azure_endpoint, pi_api_version = _resolve_pi_config(workspace)
+        pi_model, pi_base_url, pi_api_key, pi_azure_endpoint, pi_api_version, pi_responses = _resolve_pi_config(workspace)
         if not model:
             model = pi_model
         if not azure_endpoint and not base_url:
@@ -194,6 +195,8 @@ def main():
             api_key = pi_api_key
         if not api_version:
             api_version = pi_api_version
+        if not use_responses_api:
+            use_responses_api = pi_responses
 
     # Final default for model
     if not model:
@@ -238,6 +241,7 @@ def main():
                 examples=examples,
                 max_iterations=args.max_iterations,
                 model=model,
+                use_responses_api=use_responses_api,
             )
             return result
 

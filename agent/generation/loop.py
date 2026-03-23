@@ -123,6 +123,7 @@ async def generate_grammar(
     examples: list[str],
     max_iterations: int = 5,
     model: str = 'gpt-4o-mini',
+    use_responses_api: bool = False,
 ) -> Optional[str]:
     """
     Generate and iteratively correct a JSGF grammar.
@@ -132,19 +133,25 @@ async def generate_grammar(
     context = api.get_generation_context(target_file, description, examples)
     prompt = _build_generation_prompt(description, examples, context, target_file)
 
-    messages = [
-        {'role': 'system', 'content': _SYSTEM_PROMPT},
-        {'role': 'user', 'content': prompt},
-    ]
+    messages = [{'role': 'user', 'content': prompt}]
 
     for iteration in range(max_iterations):
-        # Call LLM via OpenAI-compatible chat completions API
-        response = client.chat.completions.create(
-            model=model,
-            max_completion_tokens=4096,
-            messages=messages,
-        )
-        source = response.choices[0].message.content.strip()
+        if use_responses_api:
+            # Responses API: system prompt goes in `instructions`, conversation in `input`
+            response = client.responses.create(
+                model=model,
+                instructions=_SYSTEM_PROMPT,
+                input=messages,
+            )
+            source = response.output[0].content[0].text.strip()
+        else:
+            # Chat Completions API
+            response = client.chat.completions.create(
+                model=model,
+                max_completion_tokens=4096,
+                messages=[{'role': 'system', 'content': _SYSTEM_PROMPT}] + messages,
+            )
+            source = response.choices[0].message.content.strip()
 
         # Strip any accidental markdown fences
         if source.startswith('```'):
