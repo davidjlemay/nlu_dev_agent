@@ -58,6 +58,20 @@ _PROVIDER_BASE_URL = {
 }
 
 
+def _find_dialect_cfg(start: Path) -> tuple[Path | None, Path]:
+    """Walk up from *start* searching for jsgf-dialect.json.
+
+    Returns (cfg_path_or_None, data_root) where data_root is the directory
+    containing the config file (used as the base for DataLoader paths).
+    Falls back to *start* if no config is found.
+    """
+    for p in [start, *start.parents]:
+        candidate = p / 'jsgf-dialect.json'
+        if candidate.exists():
+            return candidate, p
+    return None, start
+
+
 def _resolve_pi_config(workspace: Path) -> tuple:
     """Return (model, base_url, api_key, azure_endpoint, api_version) from pi-mono config,
     or (None, None, None, None, None).
@@ -208,15 +222,15 @@ def main():
         if api_key:
             base_url = _PROVIDER_BASE_URL['anthropic']
 
-    dialect_cfg = workspace / 'jsgf-dialect.json'
+    dialect_cfg, data_root = _find_dialect_cfg(workspace)
     dialect = (
         DialectRegistry.from_config(dialect_cfg)
-        if dialect_cfg.exists()
+        if dialect_cfg is not None
         else DialectRegistry.standard()
     )
     index = GrammarIndex(workspace, dialect)
     index.index_workspace()
-    loader = DataLoader(dialect.data_sources, dialect.lazy_loading, workspace)
+    loader = DataLoader(dialect.data_sources, dialect.lazy_loading, data_root)
     api = GrammarAgentAPI(index, loader=loader)
 
     try:

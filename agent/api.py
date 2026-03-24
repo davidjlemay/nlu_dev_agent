@@ -145,29 +145,31 @@ class GrammarAgentAPI:
                 return CoverageResult([], utterances, 0.0)
             locs = [loc]
 
-        # When the rule uses lookup placeholders and a loader is available,
-        # generate all expansions into a set and use set membership.
+        # When the rule (or any transitively imported rule) uses lookup
+        # placeholders and a loader is available, generate all expansions into a
+        # set and use set membership.
         doc = self.index._documents.get(from_file)
         use_expansion_path = (
             self.loader is not None
-            and doc is not None
-            and bool(doc.func_placeholders)
+            and _any_has_placeholders(self.index, from_file)
         )
         if use_expansion_path:
             loc = locs[0]
             if loc.rule.grammar_object is not None:
                 budget = [self.loader.expansion_limit]  # type: ignore[union-attr]
                 try:
-                    expansion_set = set(_generate_expansions(
-                        loc.rule.grammar_object.expansion, self.index, from_file,
-                        loader=self.loader, doc=doc, budget=budget,
-                    ))
+                    expansion_set = {
+                        e.lower() for e in _generate_expansions(
+                            loc.rule.grammar_object.expansion, self.index, from_file,
+                            loader=self.loader, doc=doc, budget=budget,
+                        )
+                    }
                 except RecursionError:
                     expansion_set = set()
                 covered: list[str] = []
                 uncovered: list[str] = []
                 for u in utterances:
-                    (covered if u in expansion_set else uncovered).append(u)
+                    (covered if u.lower() in expansion_set else uncovered).append(u)
                 ratio = len(covered) / len(utterances) if utterances else 0.0
                 return CoverageResult(covered, uncovered, ratio)
 
@@ -333,6 +335,27 @@ class GrammarAgentAPI:
 
 
 # ------------------------------------------------------------------ #
+#  Helpers                                                             #
+# ------------------------------------------------------------------ #
+
+def _any_has_placeholders(index: GrammarIndex, from_file: Path) -> bool:
+    """Return True if from_file or any transitively imported file has func_placeholders."""
+    visited: set[Path] = set()
+    queue = [from_file]
+    while queue:
+        path = queue.pop()
+        if path in visited:
+            continue
+        visited.add(path)
+        doc = index._documents.get(path)
+        if doc and doc.func_placeholders:
+            return True
+        for imp_path in index._imports.get(path, set()):
+            queue.append(imp_path)
+    return False
+
+
+# ------------------------------------------------------------------ #
 #  Expansion generator (bounded)                                       #
 # ------------------------------------------------------------------ #
 
@@ -362,7 +385,7 @@ def _generate_expansions(
         SingleChildExpansion,
     )
 
-    if depth > 6:
+    if depth > 12:
         return
 
     def _budget_ok() -> bool:

@@ -223,6 +223,27 @@ public <check_balance> = balance of $lookup('banks');
     assert isinstance(examples, list)
 
 
+def test_validate_coverage_lookup_case_insensitive():
+    """Coverage matching is case-insensitive: loaded items in mixed case match lowercase utterances."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <bank_name> = (at | with) $lookup('banks');
+"""
+    path = Path('/tmp/lookup_case.jsgf')
+    # Bank names with mixed / upper casing (as loaded from a real file)
+    loader = _make_loader(['TD Canada-Trust', 'BMO', 'Scotiabank'], source_name='banks')
+    api = _api_with_loader(source, path, loader)
+    result = api.validate_coverage(
+        'bank_name', path,
+        ['at td canada-trust', 'with bmo', 'at xyz bank'],
+    )
+    assert 'at td canada-trust' in result.covered
+    assert 'with bmo' in result.covered
+    assert 'at xyz bank' in result.uncovered
+    assert abs(result.coverage_ratio - 2 / 3) < 0.01
+
+
 def test_budget_limits_expansions():
     """expansion_limit caps the number of generated items."""
     # 20 alternatives combined with a prefix generates 20 expansions

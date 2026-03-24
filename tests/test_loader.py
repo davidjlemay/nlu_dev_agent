@@ -148,3 +148,59 @@ def test_expansion_limit_property():
     src = DataSource(name='x', type='inline', values=[])
     loader = _loader({'x': src}, expansion_limit=42)
     assert loader.expansion_limit == 42
+
+
+# ------------------------------------------------------------------ #
+#  _find_dialect_cfg (walk-up helper used by CLI skills)              #
+# ------------------------------------------------------------------ #
+
+def _load_coverage_skill():
+    """Load the coverage skill module (handles hyphenated directory name)."""
+    import importlib.util
+    skill_path = Path(__file__).parent.parent / 'skills' / 'jsgf-coverage' / 'coverage.py'
+    spec = importlib.util.spec_from_file_location('coverage_skill', skill_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_find_dialect_cfg_walks_up_to_parent():
+    """Config found by walking up from a subdirectory."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        sub = root / 'grammars'
+        sub.mkdir()
+        cfg = root / 'jsgf-dialect.json'
+        cfg.write_text('{}')
+
+        find = _load_coverage_skill()._find_dialect_cfg
+
+        # Start from sub/ — should walk up and find config at root/
+        found_cfg, data_root = find(sub)
+        assert found_cfg == cfg
+        assert data_root == root
+
+
+def test_find_dialect_cfg_finds_in_start_dir():
+    """Config found in the start directory itself (no walk needed)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        cfg = root / 'jsgf-dialect.json'
+        cfg.write_text('{}')
+
+        find = _load_coverage_skill()._find_dialect_cfg
+        found_cfg, data_root = find(root)
+        assert found_cfg == cfg
+        assert data_root == root
+
+
+def test_find_dialect_cfg_returns_none_when_missing():
+    """Falls back to (None, start) when no config file exists anywhere."""
+    find = _load_coverage_skill()._find_dialect_cfg
+
+    with tempfile.TemporaryDirectory() as tmp:
+        start = Path(tmp) / 'deep' / 'nested'
+        start.mkdir(parents=True)
+        found_cfg, data_root = find(start)
+        assert found_cfg is None
+        assert data_root == start

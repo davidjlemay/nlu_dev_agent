@@ -9,12 +9,16 @@
   },
   "lazy_loading": {
     "lookup_limit": 50,
-    "expansion_limit": 200
+    "expansion_limit": 5000
   },
   "data_sources": {
     "bank_names": { "type": "file", "path": "nonterminals/bank_names.txt" },
+    "bank_name": { "type": "file", "path": "nonterminals/bank_names.txt" },
     "company_names": { "type": "file", "path": "nonterminals/company_names.txt" },
+    "company_name": { "type": "file", "path": "nonterminals/company_names.txt" },
     "loan_type":   { "type": "file", "path": "nonterminals/loan_types.txt" },
+    "amortization_period": { "type": "file", "path": "nonterminals/amortization_periods.txt" },
+    "cash_amount": { "type": "file", "path": "nonterminals/cash_amounts.txt" },
     "currencies":  { "type": "inline", "values": ["USD", "EUR", "GBP"] }
   },
   "flags": {
