@@ -160,7 +160,7 @@ def _mangle_name(base_name: str, flags_str: str) -> str:
 
 def _mangle_source(
     source: str,
-) -> tuple[str, dict[str, str], dict[str, Position]]:
+) -> tuple[str, dict[str, str], dict[str, Position], dict[str, dict[str, str]]]:
     """
     Rewrite each rule declaration that carries LHS flags so that pyjsgf sees a
     unique, identifier-safe rule name.  Only the declaration name is rewritten;
@@ -170,9 +170,11 @@ def _mangle_source(
         mangled_source      — source with declaration names replaced
         pyjsgf_to_original  — mangled_name → original_name
         pyjsgf_to_position  — mangled_name → Position of '<' in *source*
+        pyjsgf_to_flags     — mangled_name → {flag_key: flag_value, ...} (raw values)
     """
     pyjsgf_to_original: dict[str, str] = {}
     pyjsgf_to_position: dict[str, Position] = {}
+    pyjsgf_to_flags: dict[str, dict[str, str]] = {}
     offsets = _line_offsets(source)
 
     def replacer(m: re.Match) -> str:
@@ -183,6 +185,10 @@ def _mangle_source(
             pyjsgf_to_original[mangled] = original
             angle_offset = m.start('rulename') - 1  # position of '<'
             pyjsgf_to_position[mangled] = offset_to_position(angle_offset, offsets)
+            flags_dict: dict[str, str] = {}
+            for fm in _FLAG_MANGLE_RE.finditer(flags_str):
+                flags_dict[fm.group(1).strip()] = fm.group(3).strip()
+            pyjsgf_to_flags[mangled] = flags_dict
         pub = m.group('pub')
         flags = m.group('flags')
         eq = m.group('eq')
@@ -255,7 +261,7 @@ def _mangle_source(
         mangled_source += '\n// [synthetic union rules for pyjsgf]\n'
         mangled_source += '\n'.join(union_rules) + '\n'
 
-    return mangled_source, pyjsgf_to_original, pyjsgf_to_position
+    return mangled_source, pyjsgf_to_original, pyjsgf_to_position, pyjsgf_to_flags
 
 
 @dataclass
@@ -305,6 +311,8 @@ class GrammarDocument:
     param_placeholder_map: dict[str, str] = field(default_factory=dict)
     # Parameterized call sites: rule_name → list of arg-lists (before stripping)
     param_call_sites: dict[str, list] = field(default_factory=dict)
+    # LHS flags of the rule that contains each PLHDR token (empty for unflagged rules)
+    placeholder_flags: dict[str, dict[str, str]] = field(default_factory=dict)
 
     # ------------------------------------------------------------------ #
     #  Construction                                                        #
@@ -332,7 +340,7 @@ class GrammarDocument:
                 _name_to_params[_nm] = _parse_params(_pm.group(2) or '')
 
         # Mangle rule names for LHS flag variants so pyjsgf sees unique names
-        mangled_source, pyjsgf_to_original, pyjsgf_to_pos = _mangle_source(source)
+        mangled_source, pyjsgf_to_original, pyjsgf_to_pos, pyjsgf_to_flags = _mangle_source(source)
 
         # pyjsgf_def_positions: unflagged rules keep name == pyjsgf_name,
         # flagged variants get their per-variant positions from _mangle_source
@@ -358,6 +366,7 @@ class GrammarDocument:
         func_placeholders: dict[str, tuple] = {}
         param_placeholder_map: dict[str, str] = {}
         param_call_sites: dict[str, list] = {}
+        placeholder_flags: dict[str, dict[str, str]] = {}
 
         try:
             from jsgf.parser import parse_grammar_string
@@ -367,6 +376,19 @@ class GrammarDocument:
                 param_map=param_placeholder_map,
                 call_site_map=param_call_sites,
             )
+
+            # Post-pass: associate each PLHDR token with the LHS flags of its
+            # enclosing rule (only for flagged variants; unflagged rules get no entry).
+            if pyjsgf_to_flags:
+                _RULE_BODY_RE = re.compile(r'<([A-Za-z0-9_.$-]+)>\s*=([^;]+);')
+                for _rm in _RULE_BODY_RE.finditer(stripped):
+                    _rpn = _rm.group(1)
+                    if _rpn not in pyjsgf_to_flags:
+                        continue
+                    _rflags = pyjsgf_to_flags[_rpn]
+                    for _pm in re.finditer(r'\bplhdr\d+\b', _rm.group(2).lower()):
+                        placeholder_flags[_pm.group().upper()] = _rflags
+
             g = parse_grammar_string(stripped)
             grammar_name = g.name
             pyjsgf_grammar = g
@@ -410,6 +432,7 @@ class GrammarDocument:
             func_placeholders=func_placeholders,
             param_placeholder_map=param_placeholder_map,
             param_call_sites=param_call_sites,
+            placeholder_flags=placeholder_flags,
         )
 
     # ------------------------------------------------------------------ #

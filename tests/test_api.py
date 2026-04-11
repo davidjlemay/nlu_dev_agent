@@ -244,6 +244,36 @@ public <bank_name> = (at | with) $lookup('banks');
     assert abs(result.coverage_ratio - 2 / 3) < 0.01
 
 
+def test_validate_coverage_flagged_lookup():
+    """Flagged lookup rules load only matching subset of the data source.
+
+    The 'banks' source has ca and us tagged items; each rule variant loads only
+    its matching subset.  Coverage unions across both variants.
+    """
+    fixture = FIXTURES / 'flagged_lookup.jsgf'
+    banks_src = DataSource(
+        name='banks', type='inline', format='json',
+        values=[
+            {'value': 'TD', 'flags': {'region': 'ca'}},
+            {'value': 'BMO', 'flags': {'region': 'ca'}},
+            {'value': 'Chase', 'flags': {'region': 'us'}},
+        ],
+    )
+    config = LazyLoadingConfig(lookup_limit=50, expansion_limit=200)
+    loader = DataLoader({'banks': banks_src}, config, FIXTURES)
+
+    dialect = DialectRegistry.standard()
+    index = GrammarIndex(FIXTURES, dialect)
+    index.update_file(fixture, fixture.read_text())
+    api = GrammarAgentAPI(index, loader=loader)
+
+    result = api.validate_coverage('bank', fixture, ['TD', 'Chase', 'unknown'])
+    assert 'TD' in result.covered        # from ca variant
+    assert 'Chase' in result.covered     # from us variant
+    assert 'unknown' in result.uncovered
+    assert abs(result.coverage_ratio - 2 / 3) < 0.01
+
+
 def test_budget_limits_expansions():
     """expansion_limit caps the number of generated items."""
     # 20 alternatives combined with a prefix generates 20 expansions

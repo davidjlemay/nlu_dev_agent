@@ -151,6 +151,122 @@ def test_expansion_limit_property():
 
 
 # ------------------------------------------------------------------ #
+#  load_filtered — flag-based filtering                               #
+# ------------------------------------------------------------------ #
+
+def test_load_filtered_json_by_flag():
+    src = DataSource(name='banks', type='inline', format='json', values=[
+        {'value': 'TD', 'flags': {'region': 'ca'}},
+        {'value': 'BMO', 'flags': {'region': 'ca'}},
+        {'value': 'Chase', 'flags': {'region': 'us'}},
+    ])
+    loader = _loader({'banks': src})
+    result = loader.load_filtered('banks', {'region': 'ca'})
+    assert result == ['TD', 'BMO']
+
+
+def test_load_filtered_json_us_flag():
+    src = DataSource(name='banks', type='inline', format='json', values=[
+        {'value': 'TD', 'flags': {'region': 'ca'}},
+        {'value': 'Chase', 'flags': {'region': 'us'}},
+    ])
+    loader = _loader({'banks': src})
+    result = loader.load_filtered('banks', {'region': 'us'})
+    assert result == ['Chase']
+
+
+def test_load_filtered_lines_by_flag():
+    src = DataSource(name='banks', type='inline', values=[
+        'TD{region=ca}',
+        'BMO{region=ca}',
+        'Chase{region=us}',
+    ])
+    loader = _loader({'banks': src})
+    result = loader.load_filtered('banks', {'region': 'ca'})
+    assert result == ['TD', 'BMO']
+
+
+def test_load_filtered_untagged_items_always_match():
+    src = DataSource(name='items', type='inline', format='json', values=[
+        'global_bank',
+        {'value': 'TD', 'flags': {'region': 'ca'}},
+    ])
+    loader = _loader({'items': src})
+    result = loader.load_filtered('items', {'region': 'ca'})
+    assert 'global_bank' in result
+    assert 'TD' in result
+
+
+def test_load_filtered_untagged_lines_always_match():
+    src = DataSource(name='items', type='inline', values=[
+        'global_bank',
+        'TD{region=ca}',
+    ])
+    loader = _loader({'items': src})
+    result = loader.load_filtered('items', {'region': 'us'})
+    assert 'global_bank' in result
+    assert 'TD' not in result
+
+
+def test_load_filtered_no_flags_delegates_to_load():
+    src = DataSource(name='items', type='inline', values=['a', 'b'])
+    loader = _loader({'items': src})
+    assert loader.load_filtered('items', {}) == loader.load('items')
+
+
+def test_load_lines_strips_flag_suffix():
+    """load() with no filter returns clean values (flag suffixes stripped)."""
+    src = DataSource(name='banks', type='inline', values=[
+        'TD{region=ca}',
+        'Chase{region=us}',
+        'plain_bank',
+    ])
+    loader = _loader({'banks': src})
+    result = loader.load('banks')
+    assert result == ['TD', 'Chase', 'plain_bank']
+
+
+def test_load_filtered_cached():
+    src = DataSource(name='banks', type='inline', format='json', values=[
+        {'value': 'TD', 'flags': {'region': 'ca'}},
+    ])
+    loader = _loader({'banks': src})
+    r1 = loader.load_filtered('banks', {'region': 'ca'})
+    r2 = loader.load_filtered('banks', {'region': 'ca'})
+    assert r1 is r2
+
+
+def test_load_filtered_file_lines(tmp_path):
+    banks_file = tmp_path / 'banks.txt'
+    banks_file.write_text('TD{region=ca}\nBMO{region=ca}\nChase{region=us}\n')
+    src = DataSource(name='banks', type='file', path=str(banks_file), format='lines')
+    loader = DataLoader({'banks': src}, LazyLoadingConfig(), tmp_path)
+    assert loader.load_filtered('banks', {'region': 'ca'}) == ['TD', 'BMO']
+    assert loader.load('banks') == ['TD', 'BMO', 'Chase']
+
+
+def test_invalidate_clears_filtered_cache():
+    src = DataSource(name='x', type='inline', format='json', values=[
+        {'value': 'a', 'flags': {'k': 'v'}},
+    ])
+    loader = _loader({'x': src})
+    loader.load_filtered('x', {'k': 'v'})
+    assert len(loader._filtered_cache) == 1
+    loader.invalidate('x')
+    assert len(loader._filtered_cache) == 0
+
+
+def test_invalidate_all_clears_filtered_cache():
+    src = DataSource(name='x', type='inline', format='json', values=[
+        {'value': 'a', 'flags': {'k': 'v'}},
+    ])
+    loader = _loader({'x': src})
+    loader.load_filtered('x', {'k': 'v'})
+    loader.invalidate()
+    assert loader._filtered_cache == {}
+
+
+# ------------------------------------------------------------------ #
 #  _find_dialect_cfg (walk-up helper used by CLI skills)              #
 # ------------------------------------------------------------------ #
 

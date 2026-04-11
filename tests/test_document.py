@@ -158,7 +158,7 @@ grammar test;
 public <noun> {number:enum=singular} = book;
 public <sentence> = <noun>;
 """
-    mangled, pyjsgf_to_orig, _ = _mangle_source(source)
+    mangled, pyjsgf_to_orig, _, _ = _mangle_source(source)
     # Declaration is rewritten
     assert '<noun__number_singular>' in mangled
     # Body reference to <noun> in <sentence> IS rewritten (unambiguous: one variant)
@@ -176,7 +176,7 @@ public <noun> {number:enum=singular} = book;
 public <noun> {number:enum=plural} = books;
 public <sentence> = <noun>;
 """
-    mangled, pyjsgf_to_orig, _ = _mangle_source(source)
+    mangled, pyjsgf_to_orig, _, _ = _mangle_source(source)
     assert '<noun__number_singular>' in mangled
     assert '<noun__number_plural>' in mangled
     # Body reference is ambiguous (two variants) — NOT rewritten
@@ -193,7 +193,7 @@ grammar test;
 <noun> {number:enum=plural}   = books;
 public <sentence> = I read <noun> {number:enum=plural};
 """
-    mangled, pyjsgf_to_orig, _ = _mangle_source(source)
+    mangled, pyjsgf_to_orig, _, _ = _mangle_source(source)
     # The flagged reference should resolve to the plural variant
     body = mangled.split('<sentence>')[1]
     assert '<noun__number_plural>' in body
@@ -211,7 +211,7 @@ grammar test;
 <noun> {number:enum=plural}   = books;
 public <sentence> = I read <noun> {number:enum=dual};
 """
-    mangled, _, _ = _mangle_source(source)
+    mangled, _, _, _ = _mangle_source(source)
     body = mangled.split('<sentence>')[1]
     # 'dual' variant doesn't exist — flagged ref pass leaves it unchanged,
     # bare <noun> resolves to synthetic union of singular|plural
@@ -331,7 +331,7 @@ grammar test;
 public <cardinal> = one | two | three;
 public <buy> = pay <cost> {currency:enum=usd};
 """
-    mangled, pyjsgf_to_orig, _ = _mangle_source(source)
+    mangled, pyjsgf_to_orig, _, _ = _mangle_source(source)
     body = mangled.split('<buy>')[1]
     assert '<cost__currency_usd>' in body
 
@@ -378,7 +378,7 @@ public <transfer[$from, $to]> {currency:enum=usd} = transfer $from to $to in dol
     assert rule is not None
     assert rule.pyjsgf_name == 'transfer__currency_usd'
     # mangled source should NOT contain [$from, $to]
-    mangled, _, _ = _mangle_source(source)
+    mangled, _, _, _ = _mangle_source(source)
     assert '[$from, $to]' not in mangled
 
 
@@ -394,7 +394,7 @@ public <my_transfer> = <transfer[<savings>, <chequing>]> {currency:enum=usd};
 """
     doc = GrammarDocument.parse(Path('/tmp/param_ref.jsgf'), source)
     assert doc.parse_error is None
-    mangled, _, _ = _mangle_source(source)
+    mangled, _, _, _ = _mangle_source(source)
     body = mangled.split('<my_transfer>')[1]
     assert '<transfer__currency_usd>' in body
 
@@ -542,3 +542,42 @@ def test_strip_dialect_tags_with_maps():
     fn_name, fn_args = next(iter(func_map.values()))
     assert fn_name == 'lookup'
     assert fn_args == ['banks']
+
+
+# ------------------------------------------------------------------ #
+#  placeholder_flags — flag context for lookup placeholders           #
+# ------------------------------------------------------------------ #
+
+def test_placeholder_flags_populated_for_flagged_rules():
+    """Each PLHDR in a flagged rule body gets the rule's LHS flags."""
+    fixture = FIXTURES / 'flagged_lookup.jsgf'
+    doc = GrammarDocument.parse(fixture, fixture.read_text())
+    assert doc.parse_error is None
+    # Two variants: PLHDR0 in ca rule, PLHDR1 in us rule
+    assert doc.placeholder_flags.get('PLHDR0') == {'region': 'ca'}
+    assert doc.placeholder_flags.get('PLHDR1') == {'region': 'us'}
+
+
+def test_placeholder_flags_empty_for_unflagged_rule():
+    """An unflagged rule using $lookup() has no entry in placeholder_flags."""
+    source = (
+        '#JSGF V1.0;\n'
+        'grammar test;\n'
+        "public <item> = $lookup('things');\n"
+    )
+    doc = GrammarDocument.parse(Path('test.jsgf'), source)
+    # PLHDR0 exists in func_placeholders but not in placeholder_flags
+    assert 'PLHDR0' in doc.func_placeholders
+    assert 'PLHDR0' not in doc.placeholder_flags
+
+
+def test_mangle_source_returns_pyjsgf_to_flags():
+    """_mangle_source now returns a 4-tuple including raw flag dicts."""
+    source = (
+        '#JSGF V1.0;\ngrammar t;\n'
+        'public <noun> {number:enum=singular} = book;\n'
+        'public <noun> {number:enum=plural} = books;\n'
+    )
+    _, _, _, pyjsgf_to_flags = _mangle_source(source)
+    assert pyjsgf_to_flags.get('noun__number_singular') == {'number': 'singular'}
+    assert pyjsgf_to_flags.get('noun__number_plural') == {'number': 'plural'}

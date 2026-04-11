@@ -154,24 +154,24 @@ class GrammarAgentAPI:
             and _any_has_placeholders(self.index, from_file)
         )
         if use_expansion_path:
-            loc = locs[0]
-            if loc.rule.grammar_object is not None:
-                budget = [self.loader.expansion_limit]  # type: ignore[union-attr]
-                try:
-                    expansion_set = {
-                        e.lower() for e in _generate_expansions(
-                            loc.rule.grammar_object.expansion, self.index, from_file,
-                            loader=self.loader, doc=doc, budget=budget,
-                        )
-                    }
-                except RecursionError:
-                    expansion_set = set()
-                covered: list[str] = []
-                uncovered: list[str] = []
-                for u in utterances:
-                    (covered if u.lower() in expansion_set else uncovered).append(u)
-                ratio = len(covered) / len(utterances) if utterances else 0.0
-                return CoverageResult(covered, uncovered, ratio)
+            expansion_set: set[str] = set()
+            for loc in locs:
+                if loc.rule.grammar_object is not None:
+                    target_doc = self.index._documents.get(loc.file) or doc
+                    budget = [self.loader.expansion_limit]  # type: ignore[union-attr]
+                    try:
+                        expansion_set |= {
+                            e.lower() for e in _generate_expansions(
+                                loc.rule.grammar_object.expansion, self.index, loc.file,
+                                loader=self.loader, doc=target_doc, budget=budget,
+                            )
+                        }
+                    except RecursionError:
+                        pass
+            covered: list[str] = [u for u in utterances if u.lower() in expansion_set]
+            uncovered: list[str] = [u for u in utterances if u.lower() not in expansion_set]
+            ratio = len(covered) / len(utterances) if utterances else 0.0
+            return CoverageResult(covered, uncovered, ratio)
 
         rule_objs = [loc.rule.grammar_object for loc in locs if loc.rule.grammar_object]
         if not rule_objs:
@@ -422,7 +422,11 @@ def _generate_expansions(
                     if fn_info:
                         fn_name, fn_args = fn_info
                         if fn_name == 'lookup' and fn_args:
-                            loaded = loader.load(fn_args[0])
+                            plhdr_flags = (doc.placeholder_flags or {}).get(plhdr_lower.upper(), {})
+                            if plhdr_flags:
+                                loaded = loader.load_filtered(fn_args[0], plhdr_flags)
+                            else:
+                                loaded = loader.load(fn_args[0])
                             segment_options.append(loaded if loaded else [plhdr_lower])
                         else:
                             segment_options.append([plhdr_lower])
