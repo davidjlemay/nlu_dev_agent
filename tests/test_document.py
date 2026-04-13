@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.document import GrammarDocument, _mangle_name, _mangle_source, _parse_params, _strip_dialect_tags
+from core.document import GrammarDocument, _mangle_name, _mangle_source, _parse_params, _strip_dialect_tags, _substitute_param_refs
 from core.index import GrammarIndex
 from core.dialect import DialectRegistry
 
@@ -358,7 +358,7 @@ def test_parameterized_decl_strips_params_for_pyjsgf():
     source = """\
 #JSGF V1.0;
 grammar test;
-public <date_range[$start, $end]> = from $start to $end;
+public <date_range[start, end]> = from <start> to <end>;
 """
     doc = GrammarDocument.parse(Path('/tmp/param_strip.jsgf'), source)
     assert doc.parse_error is None
@@ -370,16 +370,16 @@ def test_parameterized_with_lhs_flag_mangles_name():
     source = """\
 #JSGF V1.0;
 grammar test;
-public <transfer[$from, $to]> {currency:enum=usd} = transfer $from to $to in dollars;
+public <transfer[from, to]> {currency:enum=usd} = transfer <from> to <to> in dollars;
 """
     doc = GrammarDocument.parse(Path('/tmp/param_mangle.jsgf'), source)
     assert doc.parse_error is None
     rule = doc.get_rule('transfer')
     assert rule is not None
     assert rule.pyjsgf_name == 'transfer__currency_usd'
-    # mangled source should NOT contain [$from, $to]
+    # mangled source should NOT contain [from, to]
     mangled, _, _, _ = _mangle_source(source)
-    assert '[$from, $to]' not in mangled
+    assert '[from, to]' not in mangled
 
 
 def test_parameterized_flagged_ref_resolves():
@@ -387,7 +387,7 @@ def test_parameterized_flagged_ref_resolves():
     source = """\
 #JSGF V1.0;
 grammar test;
-public <transfer[$from, $to]> {currency:enum=usd} = transfer $from to $to;
+public <transfer[from, to]> {currency:enum=usd} = transfer <from> to <to>;
 public <savings> = savings account;
 public <chequing> = chequing account;
 public <my_transfer> = <transfer[<savings>, <chequing>]> {currency:enum=usd};
@@ -404,7 +404,7 @@ def test_parameterized_unflagged_call_site_strips_args():
     source = """\
 #JSGF V1.0;
 grammar test;
-public <date_range[$start, $end]> = from $start to $end;
+public <date_range[start, end]> = from <start> to <end>;
 public <departure> = departure date;
 public <return> = return date;
 public <booking> = <date_range[<departure>, <return>]>;
@@ -414,19 +414,19 @@ public <booking> = <date_range[<departure>, <return>]>;
     assert 'booking' in doc.rule_names()
 
 
-def test_dollar_param_in_body_becomes_placeholder():
-    """Bare $param in body becomes PARM_<name> literal so pyjsgf can parse the rule."""
+def test_param_ref_in_body_becomes_parm_token():
+    """<param> rule-ref syntax in parameterized rule body is substituted to PARM_ token."""
     source = """\
 #JSGF V1.0;
 grammar test;
-public <date_range[$start, $end]> = from $start to $end;
+public <date_range[start, end]> = from <start> to <end>;
 """
-    stripped = _strip_dialect_tags(source)
-    assert '$start' not in stripped
-    assert '$end' not in stripped
-    # Named tokens (not the old flat PARAM)
-    assert 'PARM_start' in stripped
-    assert 'PARM_end' in stripped
+    subst, pmap = _substitute_param_refs(source)
+    assert '<start>' not in subst
+    assert '<end>' not in subst
+    assert 'PARM_start' in subst
+    assert 'PARM_end' in subst
+    assert pmap == {'PARM_start': 'start', 'PARM_end': 'end'}
 
 
 def test_parameterized_fixture_parses_ok():
@@ -446,7 +446,7 @@ def test_parameterized_rule_params_populated():
     source = """\
 #JSGF V1.0;
 grammar test;
-public <transfer[$from, $to]> {currency:enum=usd} = transfer $from to $to;
+public <transfer[from, to]> {currency:enum=usd} = transfer <from> to <to>;
 """
     doc = GrammarDocument.parse(Path('/tmp/param_params.jsgf'), source)
     rule = doc.get_rule('transfer')
@@ -459,7 +459,7 @@ def test_resilient_parse_parameterized_rule():
     source = """\
 #JSGF V1.0;
 grammar test;
-public <transfer[$from, $to]> {currency:enum=usd} = transfer $from to $to;
+public <transfer[from, to]> {currency:enum=usd} = transfer <from> to <to>;
 INVALID SYNTAX !!!
 """
     doc = GrammarDocument.parse(Path('/tmp/param_resilient.jsgf'), source)
@@ -512,7 +512,7 @@ def test_param_call_sites_populated():
     source = """\
 #JSGF V1.0;
 grammar test;
-public <transfer[$from, $to]> = transfer $from to $to;
+public <transfer[from, to]> = transfer <from> to <to>;
 public <savings> = savings;
 public <chequing> = chequing;
 public <my_transfer> = <transfer[<savings>, <chequing>]>;
@@ -528,20 +528,23 @@ public <my_transfer> = <transfer[<savings>, <chequing>]>;
 
 
 def test_strip_dialect_tags_with_maps():
-    """_strip_dialect_tags populates func_map and param_map when provided."""
-    source = "from $start to $end and $lookup('banks')"
+    """_strip_dialect_tags populates func_map for both explicit and shorthand lookups."""
+    source = "$start and $lookup('banks')"
     func_map: dict = {}
-    param_map: dict = {}
-    stripped = _strip_dialect_tags(source, func_map=func_map, param_map=param_map)
+    stripped = _strip_dialect_tags(source, func_map=func_map)
+    # Both $start (shorthand) and $lookup('banks') (explicit) become PLHDR tokens
     assert '$start' not in stripped
-    assert 'PARM_start' in stripped
-    assert 'PARM_end' in stripped
-    assert param_map.get('PARM_start') == 'start'
-    assert param_map.get('PARM_end') == 'end'
-    assert len(func_map) == 1
-    fn_name, fn_args = next(iter(func_map.values()))
-    assert fn_name == 'lookup'
-    assert fn_args == ['banks']
+    assert '$lookup' not in stripped
+    assert len(func_map) == 2
+    # All entries are lookup functions
+    for fn_name, fn_args in func_map.values():
+        assert fn_name == 'lookup'
+    # Shorthand $start → lookup 'start'
+    shorthand_entry = [v for v in func_map.values() if v[1] == ['start']]
+    assert len(shorthand_entry) == 1
+    # Explicit $lookup('banks') → lookup 'banks'
+    explicit_entry = [v for v in func_map.values() if v[1] == ['banks']]
+    assert len(explicit_entry) == 1
 
 
 # ------------------------------------------------------------------ #
@@ -581,3 +584,92 @@ def test_mangle_source_returns_pyjsgf_to_flags():
     _, _, _, pyjsgf_to_flags = _mangle_source(source)
     assert pyjsgf_to_flags.get('noun__number_singular') == {'number': 'singular'}
     assert pyjsgf_to_flags.get('noun__number_plural') == {'number': 'plural'}
+
+
+# ------------------------------------------------------------------ #
+#  _substitute_param_refs and $shorthand                              #
+# ------------------------------------------------------------------ #
+
+def test_substitute_param_refs_basic():
+    """<param> refs in parameterized rule body are replaced with PARM_ tokens."""
+    source = (
+        '#JSGF V1.0;\ngrammar test;\n'
+        'public <transfer[from, to]> = transfer <from> to <to>;\n'
+    )
+    subst, pmap = _substitute_param_refs(source)
+    assert '<from>' not in subst
+    assert '<to>' not in subst
+    assert 'PARM_from' in subst
+    assert 'PARM_to' in subst
+    assert pmap == {'PARM_from': 'from', 'PARM_to': 'to'}
+
+
+def test_substitute_param_refs_scoped():
+    """<from> in a non-parameterized rule is NOT substituted."""
+    source = (
+        '#JSGF V1.0;\ngrammar test;\n'
+        'public <transfer[from, to]> = transfer <from> to <to>;\n'
+        'public <other> = go <from> here;\n'  # 'from' is a real rule ref here
+    )
+    subst, _ = _substitute_param_refs(source)
+    # Inside the parameterized rule: substituted
+    transfer_body = subst.split('= transfer')[1].split(';')[0]
+    assert 'PARM_from' in transfer_body
+    # In the other rule: NOT substituted
+    other_body = subst.split('<other>')[1].split(';')[0]
+    assert '<from>' in other_body
+
+
+def test_substitute_param_refs_returns_map():
+    """Returned map covers all params across all parameterized rules."""
+    source = (
+        '#JSGF V1.0;\ngrammar test;\n'
+        'public <f[x, y]> = <x> and <y>;\n'
+        'public <g[a]> = go <a>;\n'
+    )
+    _, pmap = _substitute_param_refs(source)
+    assert set(pmap.keys()) == {'PARM_x', 'PARM_y', 'PARM_a'}
+
+
+def test_param_ref_not_in_ref_positions():
+    """After parse, declared param names do not appear in ref_positions."""
+    source = (
+        '#JSGF V1.0;\ngrammar test;\n'
+        'public <transfer[from, to]> = transfer <from> to <to>;\n'
+    )
+    doc = GrammarDocument.parse(Path('/tmp/param_ref_pos.jsgf'), source)
+    assert 'from' not in doc.ref_positions
+    assert 'to' not in doc.ref_positions
+
+
+def test_shorthand_produces_plhdr():
+    """Bare $identifier in rule body is treated as a lookup shorthand."""
+    source = (
+        '#JSGF V1.0;\ngrammar test;\n'
+        'public <check_balance> = balance of $bank_names;\n'
+    )
+    doc = GrammarDocument.parse(Path('/tmp/shorthand.jsgf'), source)
+    assert doc.parse_error is None
+    assert len(doc.func_placeholders) == 1
+    fn_name, fn_args = next(iter(doc.func_placeholders.values()))
+    assert fn_name == 'lookup'
+    assert fn_args == ['bank_names']
+
+
+def test_shorthand_and_explicit_lookup_coexist():
+    """$banks shorthand and $lookup('banks') produce equivalent PLHDR entries."""
+    source_shorthand = (
+        '#JSGF V1.0;\ngrammar test;\n'
+        'public <r> = $banks;\n'
+    )
+    source_explicit = (
+        '#JSGF V1.0;\ngrammar test;\n'
+        "public <r> = $lookup('banks');\n"
+    )
+    doc_s = GrammarDocument.parse(Path('/tmp/sh.jsgf'), source_shorthand)
+    doc_e = GrammarDocument.parse(Path('/tmp/ex.jsgf'), source_explicit)
+    assert doc_s.parse_error is None
+    assert doc_e.parse_error is None
+    fn_s = next(iter(doc_s.func_placeholders.values()))
+    fn_e = next(iter(doc_e.func_placeholders.values()))
+    assert fn_s == fn_e  # ('lookup', ['banks']) in both cases

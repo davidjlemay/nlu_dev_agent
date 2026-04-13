@@ -274,6 +274,26 @@ def test_validate_coverage_flagged_lookup():
     assert abs(result.coverage_ratio - 2 / 3) < 0.01
 
 
+def test_validate_coverage_shorthand_lookup():
+    """$banks shorthand behaves identically to $lookup('banks') for coverage."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <check_balance> = balance of $banks;
+"""
+    path = Path('/tmp/shorthand_coverage.jsgf')
+    loader = _make_loader(['td bank', 'rbc', 'cibc'], source_name='banks')
+    api = _api_with_loader(source, path, loader)
+    result = api.validate_coverage(
+        'check_balance', path,
+        ['balance of td bank', 'balance of rbc', 'balance of xyz'],
+    )
+    assert 'balance of td bank' in result.covered
+    assert 'balance of rbc' in result.covered
+    assert 'balance of xyz' in result.uncovered
+    assert abs(result.coverage_ratio - 2 / 3) < 0.01
+
+
 def test_budget_limits_expansions():
     """expansion_limit caps the number of generated items."""
     # 20 alternatives combined with a prefix generates 20 expansions

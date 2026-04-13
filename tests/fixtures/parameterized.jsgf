@@ -2,11 +2,11 @@
 grammar com.example.parameterized;
 
 // Parameterized rules with LHS flags (multiple variants by currency)
-public <transfer[$from, $to]> {currency:enum=usd} = transfer $from to $to in dollars;
-public <transfer[$from, $to]> {currency:enum=gbp} = transfer $from to $to in pounds;
+public <transfer[from, to]> {currency:enum=usd} = transfer <from> to <to> in dollars;
+public <transfer[from, to]> {currency:enum=gbp} = transfer <from> to <to> in pounds;
 
 // Parameterized rule without LHS flags
-public <date_range[$start, $end]> = from $start to $end | between $start and $end;
+public <date_range[start, end]> = from <start> to <end> | between <start> and <end>;
 
 // Call sites referencing parameterized rules (with flags)
 public <my_transfer>  = <transfer[<savings>, <chequing>]> {currency:enum=usd};

@@ -34,11 +34,69 @@ _CALL_SITE_RE = re.compile(
     r'<([A-Za-z0-9_.$-]+)\[([^\]]*)\]>(?!\s*(?:\{[^}]*\}\s*)*=)'
 )
 
+# Matches a full parameterized rule (declaration + body) for param-ref substitution.
+# Group 1: rule name, Group 2: params block (including brackets), Group 3: body text.
+_PARAM_BODY_RE = re.compile(
+    r'(?:public\s+)?'
+    r'<([A-Za-z0-9_.$-]+)'          # rule name
+    r'(\[[^\]]+\])'                  # [params] — required
+    r'>(?:\s*\{[^}]*\})*'            # optional LHS flags
+    r'\s*=\s*'
+    r'([^;]+)'                       # body
+    r';',
+    re.DOTALL,
+)
+
+
+def _substitute_param_refs(
+    source: str,
+) -> tuple[str, dict[str, str]]:
+    """
+    Pre-pass: replace ``<param>`` rule-ref syntax inside parameterized rule bodies
+    with ``PARM_param`` tokens, scoped to each rule's declared parameter list.
+
+    Returns:
+        modified_source      — source with ``<param>`` → ``PARM_param`` substituted
+        param_placeholder_map — ``{'PARM_from': 'from', ...}`` (informational)
+
+    Body references to real rules whose names happen to collide with a param name
+    are only rewritten inside the rule body that declares that param, so scoping
+    is correct as long as param names are distinct from each other.
+    """
+    param_placeholder_map: dict[str, str] = {}
+    if '[' not in source:
+        return source, param_placeholder_map
+
+    # Build list of (match.start, match.end, {param: token}) for all parameterized rules
+    substitutions: list[tuple[int, int, str]] = []  # (body_start, body_end, rewritten_body)
+
+    for m in _PARAM_BODY_RE.finditer(source):
+        params = _parse_params(m.group(2))
+        if not params:
+            continue
+        body = m.group(3)
+        body_start = m.start(3)
+        body_end = m.end(3)
+        for param in params:
+            token = f'PARM_{param}'
+            param_placeholder_map[token] = param
+            body = re.sub(rf'<({re.escape(param)})>', lambda _, t=token: t, body)
+        substitutions.append((body_start, body_end, body))
+
+    if not substitutions:
+        return source, param_placeholder_map
+
+    # Apply substitutions in reverse order to preserve offsets
+    result = source
+    for body_start, body_end, new_body in reversed(substitutions):
+        result = result[:body_start] + new_body + result[body_end:]
+
+    return result, param_placeholder_map
+
 
 def _strip_dialect_tags(
     source: str,
     func_map: dict | None = None,
-    param_map: dict | None = None,
     call_site_map: dict | None = None,
 ) -> str:
     """
@@ -46,16 +104,16 @@ def _strip_dialect_tags(
 
     Optional side-effect maps (populated in-place when provided):
       func_map       — token ('PLHDR0') → (fn_name, [args])
-      param_map      — token ('PARM_x') → param_name ('x')
       call_site_map  — rule_name → list of arg-lists from call sites
 
     Steps:
     -1. Capture parameterized call-site args into call_site_map.
      0. Strip [args] from inside angle brackets (parameterized refs/decls).
-     0b.Replace bare $param refs with named PARM_<name> tokens.
      1. Remove LHS flag blocks (one or more {…} between > and =).
      2. Replace remaining RHS dialect tag content with {tag}.
      3. Replace $function(...) calls with indexed PLHDR<n> tokens.
+     3b.Replace bare $identifier (no parens) with PLHDR<n> tokens — sugar for
+        $lookup('identifier').
     """
     # Step -1: capture call-site args before we strip them
     if call_site_map is not None:
@@ -66,26 +124,15 @@ def _strip_dialect_tags(
     # Step 0: strip [args] from inside angle brackets (parameterized refs/decls)
     source = re.sub(r'(<[A-Za-z0-9_.$-]+)\[[^\]]*\]>', r'\1>', source)
 
-    # Step 0b: replace bare $param refs (not function calls) with named tokens
-    # \b anchors to the end of the identifier so partial prefixes don't match
-    # when the full name IS followed by '(' (e.g. $normalise(...) must not match).
-    def _param_replacer(m: re.Match) -> str:
-        param_name = m.group(1)
-        token = f'PARM_{param_name}'
-        if param_map is not None:
-            param_map[token] = param_name
-        return token
-
-    source = re.sub(r'\$([A-Za-z_][A-Za-z0-9_]*)\b(?!\()', _param_replacer, source)
-
     # Step 1: remove LHS flag blocks (one or more {…} between > and =)
     source = re.sub(r'(?<=>)(\s*\{[^}]*\})+(?=\s*=)', '', source)
     # Step 2: replace remaining RHS dialect tag content with a plain token
     source = re.sub(r'\{[^}]*\}', '{tag}', source)
 
-    # Step 3: replace $function(...) calls with indexed placeholder literals
+    # Shared counter for PLHDR tokens (Steps 3 and 3b use the same sequence)
     _func_counter = [0]
 
+    # Step 3: replace $function(...) calls with indexed placeholder literals
     def _func_replacer(m: re.Match) -> str:
         token = f'PLHDR{_func_counter[0]}'
         _func_counter[0] += 1
@@ -95,6 +142,18 @@ def _strip_dialect_tags(
         return token
 
     source = re.sub(r'\$([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\)', _func_replacer, source)
+
+    # Step 3b: bare $identifier (not followed by '(') → PLHDRn lookup shorthand.
+    # Runs after Step 3 so explicit $lookup('x') is already consumed.
+    # \b ensures we don't partially match function-name prefixes.
+    def _shorthand_replacer(m: re.Match) -> str:
+        token = f'PLHDR{_func_counter[0]}'
+        _func_counter[0] += 1
+        if func_map is not None:
+            func_map[token] = ('lookup', [m.group(1)])
+        return token
+
+    source = re.sub(r'\$([A-Za-z_][A-Za-z0-9_]*)\b(?!\()', _shorthand_replacer, source)
     return source
 
 
@@ -320,8 +379,13 @@ class GrammarDocument:
 
     @classmethod
     def parse(cls, path: Path, source: str) -> GrammarDocument:
-        ref_positions = scan_positions(source)
-        def_positions = scan_rule_def_positions(source)
+        # Pre-pass: substitute <param> rule-ref syntax in parameterized rule bodies
+        # with PARM_param tokens, scoped to each rule's declared param list.
+        # This must run before scan_positions so param refs don't appear as rule refs.
+        param_subst_source, param_placeholder_map = _substitute_param_refs(source)
+
+        ref_positions = scan_positions(param_subst_source)
+        def_positions = scan_rule_def_positions(param_subst_source)
 
         grammar_name = _extract_grammar_name(source)
         parse_error: Exception | None = None
@@ -340,7 +404,7 @@ class GrammarDocument:
                 _name_to_params[_nm] = _parse_params(_pm.group(2) or '')
 
         # Mangle rule names for LHS flag variants so pyjsgf sees unique names
-        mangled_source, pyjsgf_to_original, pyjsgf_to_pos, pyjsgf_to_flags = _mangle_source(source)
+        mangled_source, pyjsgf_to_original, pyjsgf_to_pos, pyjsgf_to_flags = _mangle_source(param_subst_source)
 
         # pyjsgf_def_positions: unflagged rules keep name == pyjsgf_name,
         # flagged variants get their per-variant positions from _mangle_source
@@ -364,7 +428,6 @@ class GrammarDocument:
 
         # Collect side-effect maps during dialect-tag stripping
         func_placeholders: dict[str, tuple] = {}
-        param_placeholder_map: dict[str, str] = {}
         param_call_sites: dict[str, list] = {}
         placeholder_flags: dict[str, dict[str, str]] = {}
 
@@ -373,7 +436,6 @@ class GrammarDocument:
             stripped = _strip_dialect_tags(
                 mangled_source,
                 func_map=func_placeholders,
-                param_map=param_placeholder_map,
                 call_site_map=param_call_sites,
             )
 
