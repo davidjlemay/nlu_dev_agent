@@ -32,9 +32,11 @@ class RuleLocation:
 
 
 class GrammarIndex:
-    def __init__(self, workspace_root: Path, dialect: DialectRegistry):
+    def __init__(self, workspace_root: Path, dialect: DialectRegistry, grammar_aliases: dict[str, str] | None = None, grammar_overrides: dict[str, str] | None = None):
         self.root = workspace_root
         self.dialect = dialect
+        self.grammar_aliases = grammar_aliases or {}
+        self.grammar_overrides = grammar_overrides or {}
         self._documents: dict[Path, GrammarDocument] = {}
         # rule_name → defining file  (last writer wins within same grammar ns)
         self._rule_index: dict[str, Path] = {}
@@ -58,7 +60,12 @@ class GrammarIndex:
                 except OSError:
                     pass
         # Second pass: rebuild import edges now that all grammar names are known,
-        # then pre-resolve imports so Rule.matches() works across files.
+        # apply grammar-name overrides, then rebuild import edges again so
+        # overridden grammar names resolve, and pre-resolve imports so
+        # Rule.matches() works across files.
+        for path, doc in list(self._documents.items()):
+            self._update_import_graph(path, doc)
+        self._apply_overrides()
         for path, doc in list(self._documents.items()):
             self._update_import_graph(path, doc)
         for doc in self._documents.values():
@@ -297,6 +304,28 @@ class GrammarIndex:
         }
         if doc.grammar_name:
             self._grammar_name_index[doc.grammar_name] = path
+            # Register aliases that point to this grammar name
+            for alias, target in self.grammar_aliases.items():
+                if target == doc.grammar_name:
+                    self._grammar_name_index[alias] = path
+
+        # Cerence convention: imports often use the dotted file path rather
+        # than the declared grammar name. Register a path-derived alias so
+        # these imports resolve without requiring every file in the config.
+        try:
+            rel = path.resolve().relative_to(self.root.resolve())
+            path_based = '.'.join(rel.with_suffix('').parts)
+            if path_based and path_based not in self._grammar_name_index:
+                self._grammar_name_index[path_based] = path
+        except ValueError:
+            pass
+
+    def _apply_overrides(self) -> None:
+        """Force grammar-name → file mappings from workspace config."""
+        for name, rel_path in self.grammar_overrides.items():
+            target = self.root / rel_path
+            if target.exists() and target in self._documents:
+                self._grammar_name_index[name] = target
 
     def _update_import_graph(
         self, path: Path, doc: GrammarDocument

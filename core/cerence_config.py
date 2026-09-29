@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -21,6 +21,8 @@ class CerenceWorkspace:
     jsgf_stark: Path | None
     gazetteer_stark: Path | None
     features_json: Path | None
+    grammar_aliases: dict[str, str] = field(default_factory=dict)
+    grammar_overrides: dict[str, str] = field(default_factory=dict)
 
 
 _JSGF_STARK_BLOCK_RE = re.compile(
@@ -51,7 +53,9 @@ class CerenceConfigLoader:
 
         ws_root = self._resolve(raw.get('workspace_root', f'resources/anno-lang/{lang}/CTagger/data/jsgf'))
         jsgf_dirs = [self._resolve(p) for p in raw.get('jsgf_dirs', [str(ws_root)])]
+        jsgf_dirs += [self._resolve(p) for p in raw.get('common_jsgf_dirs', [])]
         gazetteer_dirs = [self._resolve(p) for p in raw.get('gazetteer_dirs', [f'resources/anno-lang/{lang}/CTagger/data/gazetteers'])]
+        gazetteer_dirs += [self._resolve(p) for p in raw.get('common_gazetteer_dirs', [])]
 
         jsgf_stark = self._resolve_or_none(raw.get('jsgf_stark', f'resources/anno-lang/{lang}/jsgf.stark'))
         gazetteer_stark = self._resolve_or_none(raw.get('gazetteer_stark', f'resources/anno-lang/{lang}/gazetteer.stark'))
@@ -61,6 +65,8 @@ class CerenceConfigLoader:
             dialect.avm_features = _load_features(features_json)
 
         data_sources = self._build_data_sources(jsgf_stark, gazetteer_dirs, raw.get('slot_map', {}))
+        grammar_aliases = raw.get('grammar_aliases', {})
+        grammar_overrides = raw.get('grammar_overrides', {})
 
         return CerenceWorkspace(
             lang=lang,
@@ -72,6 +78,8 @@ class CerenceConfigLoader:
             jsgf_stark=jsgf_stark,
             gazetteer_stark=gazetteer_stark,
             features_json=features_json,
+            grammar_aliases=grammar_aliases,
+            grammar_overrides=grammar_overrides,
         )
 
     def _resolve(self, path: str) -> Path:

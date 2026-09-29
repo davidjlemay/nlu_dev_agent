@@ -50,7 +50,7 @@ class InProcessRunner:
             raise FileNotFoundError(f'Missing config: {config_path}')
         ws = CerenceConfigLoader(config_path, repo_root).load()
         self.root = ws.workspace_root if ws.workspace_root.exists() else ws.jsgf_dirs[0]
-        self.index = GrammarIndex(self.root, ws.dialect)
+        self.index = GrammarIndex(self.root, ws.dialect, ws.grammar_aliases, ws.grammar_overrides)
         self.index.index_workspace()
         self.loader = DataLoader(ws.data_sources, ws.dialect.lazy_loading, self.root)
         self.api = GrammarAgentAPI(self.index, self.loader)
@@ -70,13 +70,23 @@ class InProcessRunner:
         result = self.api.validate_coverage(rule, file_path, utterances)
         return {'ok': True, **result.as_dict()}
 
-    def context(self, file_path: Path, intent: str, examples: list[str]) -> dict:
+    def context(self, file_path: Path, intent: str, examples: list[str], rule: str | None = None) -> dict:
+        if rule:
+            rule_examples = self.api.get_examples(rule, file_path, n=20)
+            if rule_examples:
+                examples = rule_examples
+            if not intent:
+                intent = rule
         ctx = self.api.get_generation_context(file_path, intent, examples)
-        return {'ok': True, **ctx.as_dict()}
+        result = ctx.as_dict()
+        if rule:
+            result['rule'] = rule
+        result['target_file'] = str(file_path)
+        return {'ok': True, **result}
 
 
 def _run_daemon_action(cmd: dict, socket_path: str, timeout: float) -> dict | None:
-    from client import DaemonClient
+    from devin_adapter.client import DaemonClient
     try:
         return DaemonClient(socket_path).call(cmd, timeout)
     except (FileNotFoundError, ConnectionError, OSError):
@@ -95,9 +105,9 @@ def _start_daemon(socket_path: str, repo_root: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='nlu_dev_agent Devin CLI')
-    parser.add_argument('--lang', '-l', required=True)
-    parser.add_argument('--action', '-a', required=True, choices=['validate', 'coverage', 'context'])
-    parser.add_argument('--file', '-f', required=True)
+    parser.add_argument('--lang', '-l', default='')
+    parser.add_argument('--action', '-a', required=True, choices=['validate', 'coverage', 'context', 'status', 'stop'])
+    parser.add_argument('--file', '-f', default='.')
     parser.add_argument('--rule', '-r', default='top')
     parser.add_argument('--utterances', '-u', default='[]')
     parser.add_argument('--intent', '-i', default='')
@@ -121,12 +131,14 @@ def main() -> None:
     if args.action == 'context':
         cmd['intent'] = args.intent
         cmd['examples'] = json.loads(args.examples)
+        if args.rule:
+            cmd['rule'] = args.rule
 
     if args.start_daemon:
         _start_daemon(args.socket, repo_root)
 
     resp = _run_daemon_action(cmd, args.socket, args.timeout)
-    if resp is None:
+    if resp is None and args.action in ('validate', 'coverage', 'context'):
         runner = InProcessRunner(args.lang, repo_root)
         if args.action == 'validate':
             resp = runner.validate(file_path)
@@ -135,7 +147,10 @@ def main() -> None:
             resp = runner.coverage(args.rule, file_path, utterances)
         else:
             examples = json.loads(args.examples)
-            resp = runner.context(file_path, args.intent, examples)
+            resp = runner.context(file_path, args.intent, examples, rule=args.rule)
+
+    if resp is None:
+        resp = {'ok': False, 'error': 'daemon not available'}
 
     print(json.dumps(resp, indent=2))
 

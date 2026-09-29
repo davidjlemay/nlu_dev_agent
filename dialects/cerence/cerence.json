@@ -6,9 +6,9 @@
   "allow_multiline_tags": false,
   "value_interpolation": false,
   "capabilities": {
-    "max_public_rules": 1,
+    "max_public_rules": null,
     "flags": "both",
-    "allow_parameterized_rules": false,
+    "allow_parameterized_rules": true,
     "function_map": {}
   },
   "avm_features": {},

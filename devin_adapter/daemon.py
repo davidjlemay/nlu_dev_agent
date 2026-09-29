@@ -47,7 +47,7 @@ class NluDevAgentServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServ
                 raise FileNotFoundError(f'No nlu_dev_agent config for {lang}: {config_path}')
             ws = CerenceConfigLoader(config_path, self.repo_root).load()
             root = ws.workspace_root if ws.workspace_root.exists() else ws.jsgf_dirs[0]
-            index = GrammarIndex(root, ws.dialect)
+            index = GrammarIndex(root, ws.dialect, ws.grammar_aliases, ws.grammar_overrides)
             index.index_workspace()
             data_loader = DataLoader(ws.data_sources, ws.dialect.lazy_loading, root)
             api = GrammarAgentAPI(index, data_loader)
@@ -104,8 +104,19 @@ class NluDevAgentServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServ
         file_path = Path(cmd['file']).resolve()
         intent = cmd.get('intent', '')
         examples = cmd.get('examples', [])
+        rule = cmd.get('rule')
+        if rule:
+            rule_examples = api.get_examples(rule, file_path, n=20)
+            if rule_examples:
+                examples = rule_examples
+            if not intent:
+                intent = rule
         ctx = api.get_generation_context(file_path, intent, examples)
-        return {'ok': True, **ctx.as_dict()}
+        result = ctx.as_dict()
+        if rule:
+            result['rule'] = rule
+        result['target_file'] = str(file_path)
+        return {'ok': True, **result}
 
     def _do_index(self, index: GrammarIndex, cmd: dict) -> dict:
         file_path = Path(cmd['file']).resolve()

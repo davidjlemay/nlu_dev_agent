@@ -137,6 +137,8 @@ class GrammarAgentAPI:
                 return rule_obj.matches(u)
             except RecursionError:
                 return False
+            except Exception:
+                return False
 
         locs = self.index.resolve_rules(rule_name, from_file)
         if not locs:

@@ -122,14 +122,18 @@ def _strip_dialect_tags(
     """
     source = _strip_weights(source)
 
+    # Strip C++-style line comments; pyjsgf only supports /* … */ comments.
+    source = re.sub(r'//.*$', '', source, flags=re.MULTILINE)
+
     # Step -1: capture call-site args before we strip them
     if call_site_map is not None:
         for m in _CALL_SITE_RE.finditer(source):
             args = [a.strip() for a in m.group(2).split(',') if a.strip()]
             call_site_map.setdefault(m.group(1), []).append(args)
 
-    # Step 0: strip [args] from inside angle brackets (parameterized refs/decls)
+    # Step 0: strip [args] and (params) from inside angle brackets (parameterized refs/decls)
     source = re.sub(r'(<[A-Za-z0-9_.$-]+)\[[^\]]*\]>', r'\1>', source)
+    source = re.sub(r'(<[A-Za-z0-9_.$-]+)\([^)]*\)>', r'\1>', source)
 
     # Step 1: remove LHS flag blocks (one or more {…} between > and =)
     source = re.sub(r'(?<=>)(\s*\{[^}]*\})+(?=\s*=)', '', source)
