@@ -71,6 +71,11 @@ class DialectRegistry:
     lazy_loading: LazyLoadingConfig = field(default_factory=LazyLoadingConfig)
     data_sources: dict[str, DataSource] = field(default_factory=dict)
     capabilities: EngineCapabilities = field(default_factory=EngineCapabilities)
+    flag_style: str = 'typed'
+    avm_features: dict[str, list[str]] = field(default_factory=dict)
+    avm_wildcards: list[str] = field(default_factory=lambda: ['*', '?'])
+    slot_map: dict[str, str] = field(default_factory=dict)
+    annotation_tag_style: str = 'none'
 
     @classmethod
     def from_config(cls, path: Path) -> DialectRegistry:
@@ -124,10 +129,15 @@ class DialectRegistry:
             reserved_flag_keys=flags.get('reserved_keys', []),
             allow_multiline_tags=tag_ext.get('allow_multiline', False),
             value_interpolation=tag_ext.get('value_interpolation', False),
-            lhs_flags_enabled=flags.get('allow_lhs', False),
+            lhs_flags_enabled=data.get('lhs_flags_enabled', flags.get('allow_lhs', False)),
             lazy_loading=lazy_loading,
             data_sources=data_sources,
             capabilities=capabilities,
+            flag_style=data.get('flag_style', 'typed'),
+            avm_features=data.get('avm_features', {}),
+            avm_wildcards=data.get('avm_wildcards', ['*', '?']),
+            slot_map=data.get('slot_map', {}),
+            annotation_tag_style=data.get('annotation_tag_style', 'none'),
         )
 
     @classmethod
@@ -146,6 +156,36 @@ class DialectRegistry:
                 f"Flag type '{type_str}' is not allowed. "
                 f"Allowed: {self.allowed_flag_types}"
             )
+        return errors
+
+    def validate_avm(self, key: str, value: str) -> list[str]:
+        """
+        Validate an AVM flag (key:value) against the feature catalog.
+        Returns a list of error messages (empty if valid).
+        """
+        errors: list[str] = []
+        if not self.avm_features:
+            return errors
+        if key in self.reserved_flag_keys:
+            return errors
+        allowed = self.avm_features.get(key)
+        if allowed is None:
+            errors.append(f"Unknown AVM feature '{key}'")
+            return errors
+
+        if value in self.avm_wildcards:
+            return errors
+        if value.startswith('?'):
+            return errors
+        if '|' in value:
+            for part in value.split('|'):
+                part = part.strip()
+                if part and part not in self.avm_wildcards and not part.startswith('?'):
+                    if part not in allowed:
+                        errors.append(f"AVM value '{part}' not allowed for feature '{key}'")
+        elif value and value not in allowed:
+            errors.append(f"AVM value '{value}' not allowed for feature '{key}'")
+
         return errors
 
     def validate_function_call(

@@ -32,6 +32,11 @@ _FLAG_RE = re.compile(
     r'([A-Za-z_][A-Za-z0-9_]*):([A-Za-z_][A-Za-z0-9_]*)=([^,}]+)'
 )
 
+# AVM flag pattern: key:value[,...]
+_AVM_RE = re.compile(
+    r'([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^,\s}]+)'
+)
+
 # Function call pattern: $name(...)
 _FUNC_RE = re.compile(r'\$([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\)')
 
@@ -59,6 +64,51 @@ def _count_items(items_str: str) -> int:
     """Count comma-separated items; empty string → 0."""
     s = items_str.strip()
     return 0 if not s else len(s.split(','))
+
+
+def _validate_flag_block(
+    dialect: DialectRegistry,
+    tag_content: str,
+    tag_start: int,
+    offsets: list[int],
+) -> list[lsp.Diagnostic]:
+    """Validate one {…} flag block as typed flags or AVM pairs."""
+    diags: list[lsp.Diagnostic] = []
+
+    typed_matches = list(_FLAG_RE.finditer(tag_content))
+    if typed_matches:
+        for flag_m in typed_matches:
+            key = flag_m.group(1)
+            type_str = flag_m.group(2)
+            value = flag_m.group(3).strip()
+            errors = dialect.validate_flag(key, type_str, value)
+            if errors:
+                flag_offset = tag_start + flag_m.start()
+                pos = _offset_to_position(flag_offset, offsets)
+                diags.append(lsp.Diagnostic(
+                    range=_pos_to_range(pos, len(flag_m.group(0))),
+                    message=errors[0],
+                    severity=lsp.DiagnosticSeverity.Error,
+                    source='jsgf-lsp',
+                ))
+        return diags
+
+    if dialect.flag_style == 'avm' or dialect.avm_features:
+        for flag_m in _AVM_RE.finditer(tag_content):
+            key = flag_m.group(1)
+            value = flag_m.group(2).strip()
+            errors = dialect.validate_avm(key, value)
+            if errors:
+                flag_offset = tag_start + flag_m.start()
+                pos = _offset_to_position(flag_offset, offsets)
+                diags.append(lsp.Diagnostic(
+                    range=_pos_to_range(pos, len(flag_m.group(0))),
+                    message=errors[0],
+                    severity=lsp.DiagnosticSeverity.Error,
+                    source='jsgf-lsp',
+                ))
+
+    return diags
 
 
 def validate_dialect(
@@ -100,46 +150,20 @@ def validate_dialect(
                 # Validate the flag content with the same typed-flag rules
                 tag_content = block_m.group(0)[1:-1]  # strip { }
                 tag_start = abs_start + 1
-                for flag_m in _FLAG_RE.finditer(tag_content):
-                    key = flag_m.group(1)
-                    type_str = flag_m.group(2)
-                    value = flag_m.group(3).strip()
-                    errors = dialect.validate_flag(key, type_str, value)
-                    if errors:
-                        flag_offset = tag_start + flag_m.start()
-                        pos = _offset_to_position(flag_offset, offsets)
-                        diags.append(lsp.Diagnostic(
-                            range=_pos_to_range(pos, len(flag_m.group(0))),
-                            message=errors[0],
-                            severity=lsp.DiagnosticSeverity.Error,
-                            source='jsgf-lsp',
-                        ))
+                diags.extend(_validate_flag_block(dialect, tag_content, tag_start, offsets))
 
-    # RHS tag and function checks only apply to dialects with typed extensions
-    if dialect.functions or dialect.allowed_flag_types:
+    # RHS tag and function checks only apply to dialects with typed/AVM extensions
+    if dialect.functions or dialect.allowed_flag_types or dialect.avm_features:
         # ---------------------------------------------------------------- #
         #  RHS tag validation                                               #
         # ---------------------------------------------------------------- #
-        # Check typed flags in RHS tags (skip LHS blocks already handled above)
+        # Check typed/AVM flags in RHS tags (skip LHS blocks already handled above)
         for m in re.finditer(r'\{([^}]+)\}', doc.source):
             if m.start() in lhs_flag_offsets:
                 continue
             tag_content = m.group(1)
             tag_start = m.start() + 1
-            for flag_m in _FLAG_RE.finditer(tag_content):
-                key = flag_m.group(1)
-                type_str = flag_m.group(2)
-                value = flag_m.group(3).strip()
-                errors = dialect.validate_flag(key, type_str, value)
-                if errors:
-                    flag_offset = tag_start + flag_m.start()
-                    pos = _offset_to_position(flag_offset, offsets)
-                    diags.append(lsp.Diagnostic(
-                        range=_pos_to_range(pos, len(flag_m.group(0))),
-                        message=errors[0],
-                        severity=lsp.DiagnosticSeverity.Error,
-                        source='jsgf-lsp',
-                    ))
+            diags.extend(_validate_flag_block(dialect, tag_content, tag_start, offsets))
 
         # Check custom function calls
         for m in _FUNC_RE.finditer(doc.source):

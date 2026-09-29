@@ -1,0 +1,17 @@
+{
+  "engine": "cerence",
+  "flag_style": "avm",
+  "avm_wildcards": ["*", "?"],
+  "lhs_flags_enabled": true,
+  "allow_multiline_tags": false,
+  "value_interpolation": false,
+  "capabilities": {
+    "max_public_rules": 1,
+    "flags": "both",
+    "allow_parameterized_rules": false,
+    "function_map": {}
+  },
+  "avm_features": {},
+  "slot_map": {},
+  "annotation_tag_style": "cerence"
+}

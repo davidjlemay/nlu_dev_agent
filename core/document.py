@@ -94,6 +94,11 @@ def _substitute_param_refs(
     return result, param_placeholder_map
 
 
+def _strip_weights(source: str) -> str:
+    source = re.sub(r'\|\|', '|', source)
+    return re.sub(r'(?<![^\s=(\[])\s*/\d+(?:\.\d+)?/\s*', '', source)
+
+
 def _strip_dialect_tags(
     source: str,
     func_map: dict | None = None,
@@ -108,13 +113,15 @@ def _strip_dialect_tags(
 
     Steps:
     -1. Capture parameterized call-site args into call_site_map.
-     0. Strip [args] from inside angle brackets (parameterized refs/decls).
+     0. Strip probability weights (/N/ and ||) and [args] from angle brackets.
      1. Remove LHS flag blocks (one or more {…} between > and =).
      2. Replace remaining RHS dialect tag content with {tag}.
      3. Replace $function(...) calls with indexed PLHDR<n> tokens.
      3b.Replace bare $identifier (no parens) with PLHDR<n> tokens — sugar for
         $lookup('identifier').
     """
+    source = _strip_weights(source)
+
     # Step -1: capture call-site args before we strip them
     if call_site_map is not None:
         for m in _CALL_SITE_RE.finditer(source):
@@ -162,8 +169,8 @@ def _parse_grammar(source: str):
     return parse_grammar_string(_strip_dialect_tags(source))
 
 
-# Regex to extract key/type/value triples from a LHS flags string
-_FLAG_MANGLE_RE = re.compile(r'\{([^:}]+):([^=}]+)=([^}]+)\}')
+# Regex to extract key/value pairs from AVM/typed flag blocks
+_AVM_RE = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^,\s}]+)')
 
 # Matches rule declarations that carry at least one LHS flag block.
 # Optional [$param1, $param2] after the rule name is captured and dropped
@@ -199,18 +206,24 @@ def _mangle_name(base_name: str, flags_str: str) -> str:
     """
     Compute the pyjsgf-safe rule name by appending sorted flag key/value pairs.
 
-    ``noun`` + ``{number:enum=singular}`` → ``noun__number_singular``
-    ``x`` + ``{b:bool=true} {a:enum=masc}`` → ``x__a_masc__b_true``  (sorted)
+    Supports both typed flags (``{number:enum=singular}``) and AVM blocks
+    (``{gender:fem,number:sg}``).  Values with ``*``, ``?var`` or ``|`` are
+    encoded safely.
 
     Returns *base_name* unchanged if *flags_str* is empty or has no parseable flags.
     """
     if not flags_str or not flags_str.strip():
         return base_name
     flags: dict[str, str] = {}
-    for m in _FLAG_MANGLE_RE.finditer(flags_str):
-        key = m.group(1).strip()
-        val = _safe_flag_val(m.group(3).strip())
-        flags[key] = val
+    for m in _AVM_RE.finditer(flags_str):
+        key = _safe_flag_val(m.group(1).strip())
+        raw_val = m.group(2).strip()
+        if '=' in raw_val:
+            _, _, raw_val = raw_val.partition('=')
+        val = _safe_flag_val(raw_val)
+        if not key:
+            continue
+        flags[key] = val or '_'
     if not flags:
         return base_name
     suffix = '__'.join(f'{k}_{v}' for k, v in sorted(flags.items()))
@@ -245,8 +258,11 @@ def _mangle_source(
             angle_offset = m.start('rulename') - 1  # position of '<'
             pyjsgf_to_position[mangled] = offset_to_position(angle_offset, offsets)
             flags_dict: dict[str, str] = {}
-            for fm in _FLAG_MANGLE_RE.finditer(flags_str):
-                flags_dict[fm.group(1).strip()] = fm.group(3).strip()
+            for fm in _AVM_RE.finditer(flags_str):
+                raw_val = fm.group(2).strip()
+                if '=' in raw_val:
+                    _, _, raw_val = raw_val.partition('=')
+                flags_dict[fm.group(1).strip()] = raw_val
             pyjsgf_to_flags[mangled] = flags_dict
         pub = m.group('pub')
         flags = m.group('flags')
