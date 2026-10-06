@@ -26,14 +26,29 @@ HF_CACHE="${HF_CACHE:-/scratch/$USER/hf-cache}"
 PROJ="${PROJ:-/scratch/$USER/nlu_dev_agent}"
 VLLM_VENV="${VLLM_VENV:-/scratch/$USER/vllm-venv}"
 API_KEY="${API_KEY:-EMPTY}"
+DTYPE="${DTYPE:-float16}"          # V100 doesn't support bfloat16; use float16; use bfloat16 on A100/H100
+QUANTIZATION="${QUANTIZATION:-}"     # quantization method: awq | gptq | fp8 | bitsandbytes | ... (omit to auto-detect)
+HF_TOKEN="${HF_TOKEN:-}"           # required for gated models (e.g. Gemma); set via: HF_TOKEN=hf_... sbatch ...
+TOOL_CALL_PARSER="${TOOL_CALL_PARSER:-}"  # enable function calling: gemma3 | llama3_json | mistral | hermes | ...
 
 # ── Setup ──────────────────────────────────────────────────────────────────────
 mkdir -p "$HF_CACHE" "$PROJ/cluster/logs"
 export HF_HOME="$HF_CACHE"
+[[ -n "$HF_TOKEN" ]] && export HUGGING_FACE_HUB_TOKEN="$HF_TOKEN"
 
-# Activate venv (must have vllm + huggingface_hub installed)
+# Activate conda env (source init script so `conda activate` works in batch jobs)
 # shellcheck disable=SC1091
-source "$VLLM_VENV/bin/activate"
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate venv
+
+# Sanity-check CUDA visibility before spending time on the model download
+python - <<'EOF'
+import torch, sys
+if not torch.cuda.is_available():
+    print("ERROR: torch.cuda.is_available() is False — check conda env or CUDA_VISIBLE_DEVICES", file=sys.stderr)
+    sys.exit(1)
+print(f"==> CUDA OK: {torch.cuda.device_count()} device(s), {torch.version.cuda}")
+EOF
 
 # ── Download model ─────────────────────────────────────────────────────────────
 echo "==> Downloading $MODEL to $HF_CACHE"
@@ -47,11 +62,28 @@ echo "==> Endpoint: $ENDPOINT  (written to $PROJ/cluster/vllm.endpoint)"
 echo "==> Model:    $MODEL"
 
 # ── Launch vLLM ───────────────────────────────────────────────────────────────
-exec python -m vllm.entrypoints.openai.api_server \
-    --model         "$MODEL" \
+TOOL_ARGS=()
+[[ -n "$TOOL_CALL_PARSER" ]] && TOOL_ARGS=(--enable-auto-tool-choice --tool-call-parser "$TOOL_CALL_PARSER")
+QUANT_ARGS=()
+[[ -n "$QUANTIZATION" ]] && QUANT_ARGS=(--quantization "$QUANTIZATION")
+
+vllm serve "$MODEL" \
     --host          0.0.0.0 \
     --port          "$PORT" \
     --max-model-len "$MAX_MODEL_LEN" \
     --tensor-parallel-size 1 \
     --api-key       "$API_KEY" \
-    --dtype         auto
+    --dtype         "$DTYPE" \
+    "${QUANT_ARGS[@]}" \
+    "${TOOL_ARGS[@]}" &
+
+VLLM_PID=$!
+
+echo "==> Waiting for server to become ready..."
+until curl -sf "http://localhost:${PORT}/health" > /dev/null 2>&1; do
+    kill -0 "$VLLM_PID" 2>/dev/null || { echo "ERROR: vLLM process exited unexpectedly"; exit 1; }
+    sleep 5
+done
+echo "==> Server is ready at $ENDPOINT"
+
+wait "$VLLM_PID"
