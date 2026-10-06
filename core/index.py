@@ -250,6 +250,11 @@ class GrammarIndex:
             if imp_doc is None or imp_doc.pyjsgf_grammar is None:
                 continue
 
+            # If the imported grammar has a public non-mangled rule for the
+            # original name (e.g. a synthetic union), standard import resolution
+            # can use it directly and we don't need per-variant aliases.
+            direct_names = {r.name for r in imp_doc.rules if r.pyjsgf_name == r.name}
+
             for rule_info in imp_doc.rules:
                 if rule_info.pyjsgf_name == rule_info.name:
                     continue  # Not mangled; standard import resolution handles it
@@ -257,6 +262,8 @@ class GrammarIndex:
                     continue
                 if rule_info.name in existing_names:
                     continue  # Collision — reported as LSP diagnostic elsewhere
+                if rule_info.name in direct_names:
+                    continue  # A union rule exists for this original name
 
                 orig_rule = rule_info.grammar_object
                 try:

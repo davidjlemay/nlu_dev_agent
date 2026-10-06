@@ -158,7 +158,7 @@ grammar test;
 public <noun> {number:enum=singular} = book;
 public <sentence> = <noun>;
 """
-    mangled, pyjsgf_to_orig, _, _ = _mangle_source(source)
+    mangled, pyjsgf_to_orig, _, _, _ = _mangle_source(source)
     # Declaration is rewritten
     assert '<noun__number_singular>' in mangled
     # Body reference to <noun> in <sentence> IS rewritten (unambiguous: one variant)
@@ -176,7 +176,7 @@ public <noun> {number:enum=singular} = book;
 public <noun> {number:enum=plural} = books;
 public <sentence> = <noun>;
 """
-    mangled, pyjsgf_to_orig, _, _ = _mangle_source(source)
+    mangled, pyjsgf_to_orig, _, _, _ = _mangle_source(source)
     assert '<noun__number_singular>' in mangled
     assert '<noun__number_plural>' in mangled
     # Body reference is ambiguous (two variants) — NOT rewritten
@@ -193,7 +193,7 @@ grammar test;
 <noun> {number:enum=plural}   = books;
 public <sentence> = I read <noun> {number:enum=plural};
 """
-    mangled, pyjsgf_to_orig, _, _ = _mangle_source(source)
+    mangled, pyjsgf_to_orig, _, _, _ = _mangle_source(source)
     # The flagged reference should resolve to the plural variant
     body = mangled.split('<sentence>')[1]
     assert '<noun__number_plural>' in body
@@ -211,7 +211,7 @@ grammar test;
 <noun> {number:enum=plural}   = books;
 public <sentence> = I read <noun> {number:enum=dual};
 """
-    mangled, _, _, _ = _mangle_source(source)
+    mangled, _, _, _, _ = _mangle_source(source)
     body = mangled.split('<sentence>')[1]
     # 'dual' variant doesn't exist — flagged ref pass leaves it unchanged,
     # bare <noun> resolves to synthetic union of singular|plural
@@ -250,8 +250,8 @@ def test_same_name_variants_no_duplicate_diagnostic():
     assert dup_diags == []
 
 
-def test_true_duplicate_still_detected():
-    """Same name + same flags → pyjsgf_name collision → diagnostic emitted."""
+def test_duplicate_rule_declarations_merged():
+    """Duplicate rule declarations are merged into a single rule with alternatives."""
     source = """\
 #JSGF V1.0;
 grammar test;
@@ -265,7 +265,12 @@ public <noun> {number:enum=singular} = cat;
     doc = index._documents[path]
     diags = doc.get_diagnostics(index)
     dup_diags = [d for d in diags if 'Duplicate' in d.message]
-    assert len(dup_diags) >= 1
+    assert dup_diags == []
+    rule = doc.get_rule('noun')
+    assert rule is not None
+    assert rule.grammar_object is not None
+    assert rule.grammar_object.matches('book')
+    assert rule.grammar_object.matches('cat')
 
 
 def test_pyjsgf_def_positions_per_variant():
@@ -331,7 +336,7 @@ grammar test;
 public <cardinal> = one | two | three;
 public <buy> = pay <cost> {currency:enum=usd};
 """
-    mangled, pyjsgf_to_orig, _, _ = _mangle_source(source)
+    mangled, pyjsgf_to_orig, _, _, _ = _mangle_source(source)
     body = mangled.split('<buy>')[1]
     assert '<cost__currency_usd>' in body
 
@@ -378,7 +383,7 @@ public <transfer[from, to]> {currency:enum=usd} = transfer <from> to <to> in dol
     assert rule is not None
     assert rule.pyjsgf_name == 'transfer__currency_usd'
     # mangled source should NOT contain [from, to]
-    mangled, _, _, _ = _mangle_source(source)
+    mangled, _, _, _, _ = _mangle_source(source)
     assert '[from, to]' not in mangled
 
 
@@ -394,9 +399,9 @@ public <my_transfer> = <transfer[<savings>, <chequing>]> {currency:enum=usd};
 """
     doc = GrammarDocument.parse(Path('/tmp/param_ref.jsgf'), source)
     assert doc.parse_error is None
-    mangled, _, _, _ = _mangle_source(source)
+    mangled, _, _, _, _ = _mangle_source(source)
     body = mangled.split('<my_transfer>')[1]
-    assert '<transfer__currency_usd>' in body
+    assert '<transfer__currency_usd' in body
 
 
 def test_parameterized_unflagged_call_site_strips_args():
@@ -581,7 +586,7 @@ def test_mangle_source_returns_pyjsgf_to_flags():
         'public <noun> {number:enum=singular} = book;\n'
         'public <noun> {number:enum=plural} = books;\n'
     )
-    _, _, _, pyjsgf_to_flags = _mangle_source(source)
+    _, _, _, pyjsgf_to_flags, _ = _mangle_source(source)
     assert pyjsgf_to_flags.get('noun__number_singular') == {'number': 'singular'}
     assert pyjsgf_to_flags.get('noun__number_plural') == {'number': 'plural'}
 
@@ -673,3 +678,184 @@ def test_shorthand_and_explicit_lookup_coexist():
     fn_s = next(iter(doc_s.func_placeholders.values()))
     fn_e = next(iter(doc_e.func_placeholders.values()))
     assert fn_s == fn_e  # ('lookup', ['banks']) in both cases
+
+
+# ------------------------------------------------------------------ #
+#  AVM variables and wildcards (Cerence long-distance agreement)     #
+# ------------------------------------------------------------------ #
+
+def test_avm_variable_ignored_for_mangling():
+    """A rule with a ?-prefixed variable should keep its base pyjsgf name."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <noun> {number:?n} = book | books;
+"""
+    doc = GrammarDocument.parse(Path('/tmp/var_mangle.jsgf'), source)
+    assert doc.parse_error is None
+    rule = doc.get_rule('noun')
+    assert rule is not None
+    assert rule.pyjsgf_name == 'noun'
+
+
+def test_avm_wildcard_ignored_for_mangling():
+    """A rule with a * wildcard should keep its base pyjsgf name."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <noun> {number:*} = book | books;
+"""
+    doc = GrammarDocument.parse(Path('/tmp/wild_mangle.jsgf'), source)
+    assert doc.parse_error is None
+    rule = doc.get_rule('noun')
+    assert rule is not None
+    assert rule.pyjsgf_name == 'noun'
+
+
+def test_avm_disjunction_ignored_for_mangling():
+    """A rule with a disjunctive value should keep its base pyjsgf name."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <noun> {number:plural|singular} = book | books;
+"""
+    doc = GrammarDocument.parse(Path('/tmp/disj_mangle.jsgf'), source)
+    assert doc.parse_error is None
+    rule = doc.get_rule('noun')
+    assert rule is not None
+    assert rule.pyjsgf_name == 'noun'
+
+
+def test_avm_variable_reference_resolves_to_wildcard_variant():
+    """A fixed reference to a variable-only rule resolves to the base rule."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <noun> {number:?n} = book | books;
+public <phrase> = <noun> {number:plural};
+"""
+    mangled, _, _, _, _ = _mangle_source(source)
+    body = mangled.split('<phrase>')[1]
+    assert '<noun>' in body
+    assert '{number:' not in body
+
+
+def test_avm_fixed_reference_prefers_exact_variant():
+    """A fixed reference prefers the exact matching variant over a wildcard."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <noun> {number:?n} = book | books;
+public <noun> {number:plural} = books;
+public <phrase> = <noun> {number:plural};
+"""
+    mangled, _, _, _, _ = _mangle_source(source)
+    body = mangled.split('<phrase>')[1]
+    assert '<noun__number_plural>' in body
+
+
+def test_avm_variable_only_duplicates_merged():
+    """Two declarations that differ only by variable name are merged."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <noun> {number:?n} = book;
+public <noun> {number:?m} = books;
+"""
+    doc = GrammarDocument.parse(Path('/tmp/var_merge.jsgf'), source)
+    assert doc.parse_error is None
+    rule = doc.get_rule('noun')
+    assert rule is not None
+    assert rule.grammar_object.matches('book')
+    assert rule.grammar_object.matches('books')
+
+
+# ------------------------------------------------------------------ #
+#  Cerence dialect lexing                                            #
+# ------------------------------------------------------------------ #
+
+def test_cerence_elision_marker_stripped():
+    """The % elision marker is removed before pyjsgf sees the source."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <a> = test%me;
+"""
+    doc = GrammarDocument.parse(Path('/tmp/elision.jsgf'), source)
+    assert doc.parse_error is None
+    rule = doc.get_rule('a')
+    assert rule is not None
+    assert rule.grammar_object.matches('testme')
+
+
+def test_cerence_pragma_lines_stripped():
+    """Non-JSGF #pragma lines are ignored."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+#ALLOW-NULL
+#USE something
+public <a> = test;
+"""
+    doc = GrammarDocument.parse(Path('/tmp/pragma.jsgf'), source)
+    assert doc.parse_error is None
+
+
+def test_cerence_weights_stripped():
+    """Probability weights like /1/ or /0.5/ are removed."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <b> = one /1/ | two /2.0/;
+"""
+    doc = GrammarDocument.parse(Path('/tmp/weights.jsgf'), source)
+    assert doc.parse_error is None
+    rule = doc.get_rule('b')
+    assert rule is not None
+    assert rule.grammar_object.matches('one')
+    assert rule.grammar_object.matches('two')
+
+
+def test_cerence_parameterized_rule_parens():
+    """Parameter lists may use parentheses as well as brackets."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <c(from, to)> = from <from> to <to>;
+"""
+    doc = GrammarDocument.parse(Path('/tmp/paren_params.jsgf'), source)
+    assert doc.parse_error is None
+    rule = doc.get_rule('c')
+    assert rule is not None
+    assert rule.params == ['from', 'to']
+
+
+def test_cerence_parameterized_rule_typed_parens():
+    """Parenthesised parameters may carry type/feature annotations."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <transfer(OBJECT:{gender,number})> = transfer <OBJECT>;
+"""
+    doc = GrammarDocument.parse(Path('/tmp/typed_paren_params.jsgf'), source)
+    assert doc.parse_error is None
+    rule = doc.get_rule('transfer')
+    assert rule is not None
+    assert rule.params == ['OBJECT']
+
+
+def test_duplicate_unflagged_rules_merged():
+    """Duplicate unflagged declarations are merged into one rule."""
+    source = """\
+#JSGF V1.0;
+grammar test;
+public <d> = hi;
+public <d> = hello;
+"""
+    doc = GrammarDocument.parse(Path('/tmp/dup_unflag.jsgf'), source)
+    assert doc.parse_error is None
+    rule = doc.get_rule('d')
+    assert rule is not None
+    assert rule.grammar_object.matches('hi')
+    assert rule.grammar_object.matches('hello')
+

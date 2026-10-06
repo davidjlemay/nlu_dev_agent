@@ -2,6 +2,7 @@
   "engine": "cerence",
   "flag_style": "avm",
   "avm_wildcards": ["*", "?"],
+  "avm_variable_prefix": "?",
   "lhs_flags_enabled": true,
   "allow_multiline_tags": false,
   "value_interpolation": false,

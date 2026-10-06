@@ -74,6 +74,7 @@ class DialectRegistry:
     flag_style: str = 'typed'
     avm_features: dict[str, list[str]] = field(default_factory=dict)
     avm_wildcards: list[str] = field(default_factory=lambda: ['*', '?'])
+    avm_variable_prefix: str = '?'
     slot_map: dict[str, str] = field(default_factory=dict)
     annotation_tag_style: str = 'none'
 
@@ -136,6 +137,7 @@ class DialectRegistry:
             flag_style=data.get('flag_style', 'typed'),
             avm_features=data.get('avm_features', {}),
             avm_wildcards=data.get('avm_wildcards', ['*', '?']),
+            avm_variable_prefix=data.get('avm_variable_prefix', '?'),
             slot_map=data.get('slot_map', {}),
             annotation_tag_style=data.get('annotation_tag_style', 'none'),
         )
@@ -175,7 +177,7 @@ class DialectRegistry:
 
         if value in self.avm_wildcards:
             return errors
-        if value.startswith('?'):
+        if value.startswith(self.avm_variable_prefix):
             return errors
         if '|' in value:
             for part in value.split('|'):
