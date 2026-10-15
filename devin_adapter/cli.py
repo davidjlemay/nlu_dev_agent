@@ -152,7 +152,7 @@ def main() -> None:
     if resp is None:
         resp = {'ok': False, 'error': 'daemon not available'}
 
-    print(json.dumps(resp, indent=2))
+    print(json.dumps(resp, indent=2, ensure_ascii=False))
 
 
 if __name__ == '__main__':

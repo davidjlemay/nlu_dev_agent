@@ -137,7 +137,7 @@ class NluDevAgentHandler(socketserver.StreamRequestHandler):
             resp = self.server.dispatch(cmd)
         except Exception as exc:
             resp = {'ok': False, 'error': str(exc)}
-        self.wfile.write((json.dumps(resp) + '\n').encode('utf-8'))
+        self.wfile.write((json.dumps(resp, ensure_ascii=False) + '\n').encode('utf-8'))
 
 
 def _diags_to_dicts(diags: list) -> list[dict]:

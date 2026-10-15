@@ -95,7 +95,7 @@ def _resolve_pi_config(workspace: Path) -> tuple:
         return (None, None, None, None, None)
 
     try:
-        settings = json.loads(settings_path.read_text())
+        settings = json.loads(settings_path.read_text(encoding='utf-8'))
     except (json.JSONDecodeError, OSError):
         return (None, None, None, None, None)
 
@@ -111,7 +111,7 @@ def _resolve_pi_config(workspace: Path) -> tuple:
         if not pi_api_key:
             auth_path = Path.home() / '.pi' / 'agent' / 'auth.json'
             try:
-                auth = json.loads(auth_path.read_text())
+                auth = json.loads(auth_path.read_text(encoding='utf-8'))
                 entry = auth.get(provider, {})
                 if entry.get('type') == 'api_key':
                     pi_api_key = entry.get('key') or None
@@ -126,7 +126,7 @@ def _resolve_pi_config(workspace: Path) -> tuple:
     if provider:
         auth_path = Path.home() / '.pi' / 'agent' / 'auth.json'
         try:
-            auth = json.loads(auth_path.read_text())
+            auth = json.loads(auth_path.read_text(encoding='utf-8'))
             entry = auth.get(provider, {})
             if entry.get('type') == 'api_key':
                 pi_api_key = entry.get('key') or None

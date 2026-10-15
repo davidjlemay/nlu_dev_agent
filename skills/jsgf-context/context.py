@@ -77,11 +77,11 @@ def main():
     api = GrammarAgentAPI(index, loader=loader)
     ctx = api.get_generation_context(file_path, args.intent, examples)
 
-    print(json.dumps(ctx.as_dict(), indent=2))
+    print(json.dumps(ctx.as_dict(), indent=2, ensure_ascii=False))
 
 
 def _error(msg: str) -> None:
-    print(json.dumps({'error': msg}), file=sys.stderr)
+    print(json.dumps({'error': msg}, ensure_ascii=False), file=sys.stderr)
     sys.exit(1)
 
 

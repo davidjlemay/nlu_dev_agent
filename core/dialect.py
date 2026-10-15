@@ -80,7 +80,7 @@ class DialectRegistry:
 
     @classmethod
     def from_config(cls, path: Path) -> DialectRegistry:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding='utf-8'))
         functions: dict[str, CustomFunction] = {}
         for name, spec in data.get('functions', {}).items():
             params = [

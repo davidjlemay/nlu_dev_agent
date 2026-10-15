@@ -83,7 +83,7 @@ def main():
         utt_path = Path(args.utterances_file)
         if not utt_path.exists():
             _error(f"Utterances file not found: {utt_path}")
-        utterances = [line.strip() for line in utt_path.read_text().splitlines() if line.strip()]
+        utterances = [line.strip() for line in utt_path.read_text(encoding='utf-8').splitlines() if line.strip()]
     else:
         _error("Provide --utterances or --utterances-file")
 
@@ -106,11 +106,11 @@ def main():
         'coverage_ratio': result.coverage_ratio,
         'covered': result.covered,
         'uncovered': result.uncovered,
-    }, indent=2))
+    }, indent=2, ensure_ascii=False))
 
 
 def _error(msg: str) -> None:
-    print(json.dumps({'error': msg}), file=sys.stderr)
+    print(json.dumps({'error': msg}, ensure_ascii=False), file=sys.stderr)
     sys.exit(1)
 
 

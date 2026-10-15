@@ -76,7 +76,7 @@ def main():
         'valid': len(diags) == 0,
         'diagnostics': [_diag_to_dict(d) for d in diags],
     }
-    print(json.dumps(result, indent=2))
+    print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 def _diag_to_dict(d) -> dict:
@@ -90,7 +90,7 @@ def _diag_to_dict(d) -> dict:
 
 
 def _error(msg: str) -> None:
-    print(json.dumps({'error': msg}), file=sys.stderr)
+    print(json.dumps({'error': msg}, ensure_ascii=False), file=sys.stderr)
     sys.exit(1)
 
 
