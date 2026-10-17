@@ -363,6 +363,13 @@ def _normalise_punctuation(source: str) -> str:
     return cleaned
 
 
+def _split_wordforms(source: str) -> str:
+    def _repl(m):
+        return f'{m.group(1)} _{m.group(2)}'
+    source = re.sub(r'(<[^>]+>|PARM_[A-Za-z0-9_]+)_' + re.escape(chr(92)) + r'(\w+)', _repl, source)
+    return re.sub(re.escape(chr(92)) + r'(\w+)', r' \1', source)
+
+
 def _fix_grammar_declaration(source: str, path: Path) -> str:
     """
     Normalise the grammar declaration.
@@ -1341,6 +1348,7 @@ class GrammarDocument:
 
         try:
             from jsgf.parser import parse_grammar_string
+            mangled_source = _split_wordforms(mangled_source)
             stripped = _strip_dialect_tags(
                 mangled_source,
                 func_map=func_placeholders,
