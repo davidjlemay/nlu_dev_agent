@@ -30,19 +30,28 @@ _INLINE_FLAG_RE = re.compile(r'^(.*?)\{([^}]+)\}\s*$')
 def _parse_line_item(line: str) -> tuple[str, dict[str, str]]:
     """Split ``"TD Bank{region=ca}"`` into ``("TD Bank", {"region": "ca"})``.
 
+    Gazetteer lines may use ``surface|canonical`` (the canonical is ignored).
     Returns ``(line, {})`` when no flag suffix is present.
     Multiple flags are comma-separated: ``value{a=1,b=2}``.
     """
+    if '|' in line:
+        line = line.rsplit('|', 1)[0]
     m = _INLINE_FLAG_RE.match(line)
     if not m:
-        return line, {}
-    value = m.group(1).strip()
-    flags: dict[str, str] = {}
-    for part in m.group(2).split(','):
-        part = part.strip()
-        if '=' in part:
-            k, _, v = part.partition('=')
-            flags[k.strip()] = v.strip()
+        value = line
+    else:
+        value = m.group(1).strip()
+        flags: dict[str, str] = {}
+        for part in m.group(2).split(','):
+            part = part.strip()
+            if '=' in part:
+                k, _, v = part.partition('=')
+                flags[k.strip()] = v.strip()
+    # Strip Cerence compound wordform markers (\cpd) from surface forms.
+    value = re.sub(r'\\[A-Za-z0-9_]+', '', value)
+    value = re.sub(r'[-_\s]+$', '', value)
+    if not m:
+        return value, {}
     return value, flags
 
 
@@ -98,6 +107,9 @@ class DataLoader:
             return []
         limit = self._config.lookup_limit
         result: list[str] = []
+        def _is_wildcard(v: str) -> bool:
+            return v == '*' or v.startswith('?')
+
         try:
             if src.format == 'json':
                 raw = self._load_raw_json(src, limit)
@@ -106,13 +118,13 @@ class DataLoader:
                         result.append(item)          # untagged: always match
                     elif isinstance(item, dict):
                         item_flags = item.get('flags', {})
-                        if all(item_flags.get(k) == v for k, v in flags.items()):
+                        if all(_is_wildcard(v) or item_flags.get(k) == v for k, v in flags.items()):
                             result.append(str(item.get('value', '')))
             else:   # 'lines' format — parse inline {key=val} suffix
                 lines = self._load_raw_lines(src, limit)
                 for line in lines:
                     value, item_flags = _parse_line_item(line)
-                    if not item_flags or all(item_flags.get(k) == v for k, v in flags.items()):
+                    if not item_flags or all(_is_wildcard(v) or item_flags.get(k) == v for k, v in flags.items()):
                         result.append(value)
         except Exception:
             pass

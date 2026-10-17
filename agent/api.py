@@ -504,14 +504,19 @@ def _generate_expansions(
                         arg_expansions: list[list[str]] = []
                         for _pname, arg_val in pairs:
                             arg_val = arg_val.strip()
+                            optional_ref = re.match(r'^\[(.*)\]$', arg_val)
+                            if optional_ref:
+                                arg_val = optional_ref.group(1).strip()
                             inner_ref = re.match(r'^<([A-Za-z0-9_.$-]+)>$', arg_val)
                             if inner_ref:
                                 ref_loc = index.resolve_rule(inner_ref.group(1), from_file)
                                 if ref_loc and ref_loc.rule.grammar_object is not None:
+                                    arg_doc = index._documents.get(ref_loc.file) if ref_loc.file != from_file else doc
+                                    arg_limit = (loader._config.lookup_limit if loader else 50)
                                     samples = list(_generate_expansions(
                                         ref_loc.rule.grammar_object.expansion,
-                                        index, from_file, depth + 1,
-                                        loader=loader, doc=doc, bindings=bindings, budget=budget,
+                                        index, ref_loc.file, depth + 1,
+                                        loader=loader, doc=arg_doc, bindings=None, budget=[arg_limit],
                                     ))
                                     arg_expansions.append(samples or [arg_val])
                                 else:

@@ -31,8 +31,13 @@ _JSGF_STARK_BLOCK_RE = re.compile(
 )
 
 _GAZETTEER_REF_RE = re.compile(
-    r"gazetteers\.['\"]([^'\"]+)['\"]\.phrases",
+    r'gazetteers\.(?:"([^"]+)"|([A-Za-z0-9_]+))',
     re.DOTALL,
+)
+
+_NTFILE_GAZ_RE = re.compile(
+    r'ntFile\s*\(\s*file\s*\([^)]*?"([^"]+\.gaz)"\s*\)\s*\)',
+    re.IGNORECASE,
 )
 
 
@@ -64,7 +69,13 @@ class CerenceConfigLoader:
         if features_json:
             dialect.avm_features = _load_features(features_json)
 
-        data_sources = self._build_data_sources(jsgf_stark, gazetteer_dirs, raw.get('slot_map', {}))
+        ll_raw = raw.get('lazy_loading', {})
+        dialect.lazy_loading = LazyLoadingConfig(
+            lookup_limit=ll_raw.get('lookup_limit', dialect.lazy_loading.lookup_limit),
+            expansion_limit=ll_raw.get('expansion_limit', dialect.lazy_loading.expansion_limit),
+        )
+
+        data_sources = self._build_data_sources(jsgf_stark, gazetteer_dirs, raw.get('slot_map', {}), raw.get('gazetteer_overrides', {}))
         grammar_aliases = raw.get('grammar_aliases', {})
         grammar_overrides = raw.get('grammar_overrides', {})
 
@@ -103,6 +114,7 @@ class CerenceConfigLoader:
         jsgf_stark: Path | None,
         gazetteer_dirs: list[Path],
         slot_map: dict[str, str],
+        gazetteer_overrides: dict[str, str],
     ) -> dict[str, DataSource]:
         sources: dict[str, DataSource] = {}
         if jsgf_stark is None or not jsgf_stark.exists():
@@ -111,6 +123,9 @@ class CerenceConfigLoader:
         nt_to_gaz = _parse_jsgf_stark(jsgf_stark)
         for nt_name, gaz_name in nt_to_gaz.items():
             source_name = slot_map.get(nt_name, nt_name)
+            if gaz_name.startswith('git.'):
+                gaz_name = gaz_name[4:]
+            gaz_name = gazetteer_overrides.get(gaz_name, gaz_name)
             gaz_file = _find_gazetteer(gaz_name, gazetteer_dirs)
             if gaz_file:
                 sources[source_name] = DataSource(
@@ -138,17 +153,20 @@ def _parse_jsgf_stark(path: Path) -> dict[str, str]:
         nt_name = block_m.group(1)
         body = block_m.group(2)
         gaz_m = _GAZETTEER_REF_RE.search(body)
+        nt_m = _NTFILE_GAZ_RE.search(body)
         if gaz_m:
-            gaz_name = gaz_m.group(1)
-            if gaz_name.startswith('git.'):
-                gaz_name = gaz_name[4:]
-            result[nt_name] = gaz_name
+            result[nt_name] = gaz_m.group(1) or gaz_m.group(2)
+        elif nt_m:
+            result[nt_name] = nt_m.group(1)
     return result
 
 
 def _find_gazetteer(gaz_name: str, dirs: list[Path]) -> Path | None:
     for d in dirs:
-        candidate = d / f'{gaz_name}.gaz'
+        if gaz_name.endswith('.gaz') or '/' in gaz_name or '\\' in gaz_name:
+            candidate = d / gaz_name
+        else:
+            candidate = d / f'{gaz_name}.gaz'
         if candidate.exists():
             return candidate
     return None
