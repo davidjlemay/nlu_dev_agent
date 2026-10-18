@@ -76,6 +76,54 @@ class GenerationContext:
         }
 
 
+@dataclass
+class IntrospectionNode:
+    """A serialisable node in a JSGF expansion tree."""
+    type: str
+    text: str | None = None
+    rule_name: str | None = None
+    resolved_file: str | None = None
+    children: list['IntrospectionNode'] = field(default_factory=list)
+    sample_expansions: list[str] = field(default_factory=list)
+
+    def as_dict(self) -> dict:
+        return {
+            'type': self.type,
+            'text': self.text,
+            'rule_name': self.rule_name,
+            'resolved_file': self.resolved_file,
+            'children': [c.as_dict() for c in self.children],
+            'sample_expansions': self.sample_expansions,
+        }
+
+
+@dataclass
+class IntrospectionResult:
+    """Result of an introspection call."""
+    rule: str
+    file: str
+    path: list[int] | None
+    max_expansions: int
+    tree: IntrospectionNode
+    sample_expansions: list[str]
+    expansion_count: int
+    coverage: CoverageResult | None = None
+
+    def as_dict(self) -> dict:
+        result: dict = {
+            'rule': self.rule,
+            'file': self.file,
+            'path': self.path,
+            'max_expansions': self.max_expansions,
+            'tree': self.tree.as_dict(),
+            'sample_expansions': self.sample_expansions,
+            'expansion_count': self.expansion_count,
+        }
+        if self.coverage is not None:
+            result['coverage'] = self.coverage.as_dict()
+        return result
+
+
 # ------------------------------------------------------------------ #
 #  API                                                                 #
 # ------------------------------------------------------------------ #
@@ -304,6 +352,68 @@ class GrammarAgentAPI:
             public_rules[0].name, target_file, required_utterances
         )
         return [], coverage
+
+    # ---------------------------------------------------------------- #
+    #  Introspection                                                    #
+    # ---------------------------------------------------------------- #
+
+    def introspect_rule(
+        self,
+        rule_name: str,
+        from_file: Path,
+        path: list[int] | None = None,
+        utterances: list[str] | None = None,
+        max_expansions: int = 1000,
+    ) -> IntrospectionResult:
+        """
+        Walk the expansion of *rule_name* visible from *from_file*.
+
+        If *path* is given, it is a list of child indices selecting a sub-tree.
+        Returns the structural tree of the (sub-)expansion and up to
+        *max_expansions* concrete sample expansions.  If *utterances* is
+        supplied, reports which are covered by the selected sub-tree.
+        """
+        loc = self.index.resolve_rule(rule_name, from_file)
+        if loc is None or loc.rule.grammar_object is None:
+            raise ValueError(f'Rule not found or not parsed: <{rule_name}>')
+
+        doc = self.index._documents.get(loc.file)
+        expansion = loc.rule.grammar_object.expansion
+        sub_expansion, tree = _build_introspection_tree(
+            expansion, self.index, loc.file, doc, path or [],
+        )
+
+        budget = [max_expansions]
+        try:
+            samples = list(_generate_expansions(
+                sub_expansion, self.index, loc.file, depth=0,
+                loader=self.loader, doc=doc, budget=budget,
+            ))
+        except RecursionError:
+            samples = []
+
+        expansion_count = len(samples)
+        if len(samples) > max_expansions:
+            samples = samples[:max_expansions]
+
+        coverage = None
+        if utterances:
+            lower_set = {s.lower() for s in samples}
+            covered = [u for u in utterances if u.lower() in lower_set]
+            uncovered = [u for u in utterances if u.lower() not in lower_set]
+            ratio = len(covered) / len(utterances) if utterances else 0.0
+            coverage = CoverageResult(covered, uncovered, ratio)
+
+        return IntrospectionResult(
+            rule=rule_name,
+            file=str(loc.file),
+            path=path,
+            max_expansions=max_expansions,
+            tree=tree,
+            sample_expansions=samples,
+            expansion_count=expansion_count,
+            coverage=coverage,
+        )
 
     # ---------------------------------------------------------------- #
     #  Private helpers                                                  #
@@ -556,3 +666,71 @@ def _generate_expansions(
                 child, index, from_file, depth + 1,
                 loader=loader, doc=doc, bindings=bindings, budget=budget,
             )
+
+
+def _expansion_children(expansion) -> list:
+    """Return the child expansion objects for a pyjsgf expansion."""
+    children = list(getattr(expansion, 'children', []))
+    child = getattr(expansion, 'child', None)
+    if child is not None and child not in children:
+        children.append(child)
+    return children
+
+
+def _make_introspection_node(expansion, index: GrammarIndex, from_file: Path, doc):
+    """Build a serialisable IntrospectionNode for a single expansion."""
+    from jsgf.expansions import Literal, NamedRuleRef
+
+    node_type = type(expansion).__name__
+    text: str | None = None
+    rule_name: str | None = None
+    resolved_file: str | None = None
+    children_nodes: list[IntrospectionNode] = []
+
+    if isinstance(expansion, Literal):
+        text = expansion.text
+    elif isinstance(expansion, NamedRuleRef):
+        rule_name = expansion.name
+        loc = index.resolve_rule(expansion.name, from_file)
+        if loc:
+            resolved_file = str(loc.file)
+
+    # Rule references are leaves to avoid infinite recursion in cyclic graphs.
+    if not isinstance(expansion, NamedRuleRef):
+        for child in _expansion_children(expansion):
+            children_nodes.append(
+                _make_introspection_node(child, index, from_file, doc)
+            )
+
+    return IntrospectionNode(
+        type=node_type,
+        text=text,
+        rule_name=rule_name,
+        resolved_file=resolved_file,
+        children=children_nodes,
+    )
+
+
+def _build_introspection_tree(
+    expansion,
+    index: GrammarIndex,
+    from_file: Path,
+    doc,
+    path: list[int],
+):
+    """
+    Descend *expansion* according to *path* and return the selected sub-tree
+    together with its IntrospectionNode representation.
+    """
+    if path:
+        children = _expansion_children(expansion)
+        step = path[0]
+        if not (0 <= step < len(children)):
+            raise ValueError(
+                f'Invalid branch path {step}; this node has {len(children)} children'
+            )
+        return _build_introspection_tree(
+            children[step], index, from_file, doc, path[1:],
+        )
+    node = _make_introspection_node(expansion, index, from_file, doc)
+    return expansion, node

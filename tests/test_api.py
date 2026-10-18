@@ -311,3 +311,52 @@ public <items> = the ({alts});
     examples = api.get_examples('items', path, n=100)
     # Budget should cap output; sample is taken from whatever was generated
     assert len(examples) <= 20  # at most all alternatives
+
+
+# ------------------------------------------------------------------ #
+#  Introspection                                                      #
+# ------------------------------------------------------------------ #
+
+def test_introspect_rule_returns_tree_and_samples():
+    api = _api()
+    greeting = FIXTURES / 'greeting.jsgf'
+    result = api.introspect_rule('greeting', greeting, max_expansions=10)
+    assert result.rule == 'greeting'
+    assert result.tree.type
+    assert 'hello' in result.sample_expansions
+    assert 'hi' in result.sample_expansions
+    assert result.expansion_count <= 10
+
+
+def test_introspect_rule_with_path():
+    api = _api()
+    greeting = FIXTURES / 'greeting.jsgf'
+    result = api.introspect_rule('greeting', greeting, path=[0, 1], max_expansions=5)
+    assert result.tree.type == 'Literal'
+    assert result.tree.text == 'hi'
+    assert result.sample_expansions == ['hi']
+
+
+def test_introspect_rule_coverage():
+    api = _api()
+    greeting = FIXTURES / 'greeting.jsgf'
+    result = api.introspect_rule(
+        'farewell', greeting,
+        utterances=['goodbye', 'bye', 'hello'],
+        max_expansions=20,
+    )
+    assert result.coverage is not None
+    assert 'goodbye' in result.coverage.covered
+    assert 'bye' in result.coverage.covered
+    assert 'hello' in result.coverage.uncovered
+
+
+def test_introspect_rule_invalid_path():
+    api = _api()
+    greeting = FIXTURES / 'greeting.jsgf'
+    try:
+        api.introspect_rule('greeting', greeting, path=[99], max_expansions=5)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('expected ValueError for invalid branch path')

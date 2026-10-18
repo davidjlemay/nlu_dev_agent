@@ -14,6 +14,7 @@ Import resolution follows JSGF conventions:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -32,11 +33,12 @@ class RuleLocation:
 
 
 class GrammarIndex:
-    def __init__(self, workspace_root: Path, dialect: DialectRegistry, grammar_aliases: dict[str, str] | None = None, grammar_overrides: dict[str, str] | None = None):
+    def __init__(self, workspace_root: Path, dialect: DialectRegistry, grammar_aliases: dict[str, str] | None = None, grammar_overrides: dict[str, str] | None = None, exclude_patterns: list[str] | None = None):
         self.root = workspace_root
         self.dialect = dialect
         self.grammar_aliases = grammar_aliases or {}
         self.grammar_overrides = grammar_overrides or {}
+        self.exclude_patterns = exclude_patterns or []
         self._documents: dict[Path, GrammarDocument] = {}
         # rule_name → defining file  (last writer wins within same grammar ns)
         self._rule_index: dict[str, Path] = {}
@@ -47,29 +49,55 @@ class GrammarIndex:
         # reverse: file → set of files that import it
         self._dependents: dict[Path, set[Path]] = {}
 
+    def _should_exclude(self, path: Path) -> bool:
+        parts = set(path.parts)
+        for pattern in self.exclude_patterns:
+            if pattern in parts or path.match(pattern):
+                return True
+        return False
+
     # ------------------------------------------------------------------ #
     #  Workspace bootstrap                                                 #
     # ------------------------------------------------------------------ #
 
     def index_workspace(self) -> None:
         """Scan workspace root for all .jsgf / .jsgf files and index them."""
+        _debug = os.environ.get('NLU_DEV_AGENT_DEBUG')
+        if _debug:
+            print(f'[GrammarIndex] scanning {self.root}', flush=True)
         for ext in ('*.jsgf', '*.jgram'):
+            if _debug:
+                print(f'[GrammarIndex] scanning extension {ext}', flush=True)
             for path in self.root.rglob(ext):
+                if self._should_exclude(path):
+                    if _debug:
+                        print(f'[GrammarIndex] skipping {path}', flush=True)
+                    continue
                 try:
+                    if _debug:
+                        print(f'[GrammarIndex] indexing {path}', flush=True)
                     self.update_file(path, path.read_text(encoding='utf-8'))
                 except OSError:
+                    if _debug:
+                        print(f'[GrammarIndex] cannot read {path}', flush=True)
                     pass
         # Second pass: rebuild import edges now that all grammar names are known,
         # apply grammar-name overrides, then rebuild import edges again so
         # overridden grammar names resolve, and pre-resolve imports so
         # Rule.matches() works across files.
+        if _debug:
+            print(f'[GrammarIndex] {len(self._documents)} documents parsed; rebuilding import graph...', flush=True)
         for path, doc in list(self._documents.items()):
             self._update_import_graph(path, doc)
         self._apply_overrides()
         for path, doc in list(self._documents.items()):
             self._update_import_graph(path, doc)
+        if _debug:
+            print(f'[GrammarIndex] pre-resolving imports for {len(self._documents)} documents...', flush=True)
         for doc in self._documents.values():
             self.pre_resolve_grammar_imports(doc)
+        if _debug:
+            print(f'[GrammarIndex] workspace scan complete: {len(self._documents)} documents', flush=True)
 
     # ------------------------------------------------------------------ #
     #  Incremental updates                                                 #

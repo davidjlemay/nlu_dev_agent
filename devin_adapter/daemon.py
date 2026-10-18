@@ -47,7 +47,7 @@ class NluDevAgentServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServ
                 raise FileNotFoundError(f'No nlu_dev_agent config for {lang}: {config_path}')
             ws = CerenceConfigLoader(config_path, self.repo_root).load()
             root = ws.workspace_root if ws.workspace_root.exists() else ws.jsgf_dirs[0]
-            index = GrammarIndex(root, ws.dialect, ws.grammar_aliases, ws.grammar_overrides)
+            index = GrammarIndex(root, ws.dialect, ws.grammar_aliases, ws.grammar_overrides, ws.exclude_patterns)
             index.index_workspace()
             data_loader = DataLoader(ws.data_sources, ws.dialect.lazy_loading, root)
             api = GrammarAgentAPI(index, data_loader)
@@ -75,6 +75,8 @@ class NluDevAgentServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServ
             return self._do_coverage(api, cmd)
         if action == 'context':
             return self._do_context(api, cmd)
+        if action == 'introspect':
+            return self._do_introspect(api, cmd)
         if action == 'index':
             return self._do_index(index, cmd)
 
@@ -117,6 +119,25 @@ class NluDevAgentServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServ
             result['rule'] = rule
         result['target_file'] = str(file_path)
         return {'ok': True, **result}
+
+    def _do_introspect(self, api: GrammarAgentAPI, cmd: dict) -> dict:
+        rule = cmd['rule']
+        file_path = Path(cmd['file']).resolve()
+        path = cmd.get('path')
+        if isinstance(path, str):
+            path = [int(p) for p in path.split('.') if p] if path else None
+        elif isinstance(path, list):
+            path = [int(p) for p in path]
+        utterances = cmd.get('utterances', [])
+        max_expansions = cmd.get('max_expansions', 1000)
+        try:
+            result = api.introspect_rule(
+                rule, file_path, path=path, utterances=utterances,
+                max_expansions=max_expansions,
+            )
+            return {'ok': True, **result.as_dict()}
+        except ValueError as exc:
+            return {'ok': False, 'error': str(exc)}
 
     def _do_index(self, index: GrammarIndex, cmd: dict) -> dict:
         file_path = Path(cmd['file']).resolve()

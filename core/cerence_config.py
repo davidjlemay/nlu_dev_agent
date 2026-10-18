@@ -23,6 +23,7 @@ class CerenceWorkspace:
     features_json: Path | None
     grammar_aliases: dict[str, str] = field(default_factory=dict)
     grammar_overrides: dict[str, str] = field(default_factory=dict)
+    exclude_patterns: list[str] = field(default_factory=list)
 
 
 _JSGF_STARK_BLOCK_RE = re.compile(
@@ -78,6 +79,7 @@ class CerenceConfigLoader:
         data_sources = self._build_data_sources(jsgf_stark, gazetteer_dirs, raw.get('slot_map', {}), raw.get('gazetteer_overrides', {}))
         grammar_aliases = raw.get('grammar_aliases', {})
         grammar_overrides = raw.get('grammar_overrides', {})
+        exclude_patterns = raw.get('exclude_patterns', [])
 
         return CerenceWorkspace(
             lang=lang,
@@ -91,6 +93,7 @@ class CerenceConfigLoader:
             features_json=features_json,
             grammar_aliases=grammar_aliases,
             grammar_overrides=grammar_overrides,
+            exclude_patterns=exclude_patterns,
         )
 
     def _resolve(self, path: str) -> Path:
