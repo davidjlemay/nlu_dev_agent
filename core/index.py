@@ -15,6 +15,7 @@ Import resolution follows JSGF conventions:
 from __future__ import annotations
 
 import os
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
 
 from .document import GrammarDocument, RuleInfo
 from .dialect import DialectRegistry
+from .workspace_cache import WorkspaceCache
 
 
 @dataclass
@@ -48,6 +50,9 @@ class GrammarIndex:
         self._imports: dict[Path, set[Path]] = {}
         # reverse: file → set of files that import it
         self._dependents: dict[Path, set[Path]] = {}
+        # Paths whose pyjsgf imports have already been resolved
+        self._resolved: set[Path] = set()
+        self._resolve_lock = threading.RLock()
 
     def _should_exclude(self, path: Path) -> bool:
         parts = set(path.parts)
@@ -60,8 +65,50 @@ class GrammarIndex:
     #  Workspace bootstrap                                                 #
     # ------------------------------------------------------------------ #
 
+    def _add_document(self, path: Path, doc: GrammarDocument) -> None:
+        """Store a parsed document and update rule/grammar-name indexes."""
+        self._documents[path] = doc
+        self._reindex_rules(path, doc)
+        self._reindex_grammar_name(path, doc)
+
+    def _rebuild_import_graph(self) -> None:
+        """Build import graphs and grammar-name indexes for all documents."""
+        # Second pass: rebuild import edges now that all grammar names are known,
+        # apply grammar-name overrides, then rebuild import edges again so
+        # overridden grammar names resolve.
+        _debug = os.environ.get('NLU_DEV_AGENT_DEBUG')
+        if _debug:
+            print(f'[GrammarIndex] {len(self._documents)} documents parsed; rebuilding import graph...', flush=True)
+        for path, doc in list(self._documents.items()):
+            self._update_import_graph(path, doc)
+        self._apply_overrides()
+        for path, doc in list(self._documents.items()):
+            self._update_import_graph(path, doc)
+        if _debug:
+            print(f'[GrammarIndex] import graph complete', flush=True)
+
+    def _pre_resolve_all(self) -> None:
+        """Pre-resolve pyjsgf imports for every document in the workspace."""
+        _debug = os.environ.get('NLU_DEV_AGENT_DEBUG')
+        if _debug:
+            print(f'[GrammarIndex] background pre-resolution for {len(self._documents)} documents...', flush=True)
+        with self._resolve_lock:
+            all_paths = set(self._documents)
+            memo = self.build_pyjsgf_memo()
+            order = self._post_order(all_paths)
+        for path in order:
+            with self._resolve_lock:
+                if path in self._resolved:
+                    continue
+                doc = self._documents.get(path)
+                if doc and doc.pyjsgf_grammar:
+                    self.pre_resolve_grammar_imports(doc, memo)
+                self._resolved.add(path)
+        if _debug:
+            print(f'[GrammarIndex] background pre-resolution complete', flush=True)
+
     def index_workspace(self) -> None:
-        """Scan workspace root for all .jsgf / .jsgf files and index them."""
+        """Scan workspace root for all .jsgf / .jgram files and index them."""
         _debug = os.environ.get('NLU_DEV_AGENT_DEBUG')
         if _debug:
             print(f'[GrammarIndex] scanning {self.root}', flush=True)
@@ -76,28 +123,77 @@ class GrammarIndex:
                 try:
                     if _debug:
                         print(f'[GrammarIndex] indexing {path}', flush=True)
-                    self.update_file(path, path.read_text(encoding='utf-8'))
+                    doc = GrammarDocument.parse(path, path.read_text(encoding='utf-8'))
+                    self._add_document(path, doc)
                 except OSError:
                     if _debug:
                         print(f'[GrammarIndex] cannot read {path}', flush=True)
                     pass
-        # Second pass: rebuild import edges now that all grammar names are known,
-        # apply grammar-name overrides, then rebuild import edges again so
-        # overridden grammar names resolve, and pre-resolve imports so
-        # Rule.matches() works across files.
+        self._rebuild_import_graph()
+
+    def index_workspace_from_cache(self, cache: WorkspaceCache) -> None:
+        """Build the index from cached GrammarDocuments, re-parsing only changes."""
+        _debug = os.environ.get('NLU_DEV_AGENT_DEBUG')
         if _debug:
-            print(f'[GrammarIndex] {len(self._documents)} documents parsed; rebuilding import graph...', flush=True)
-        for path, doc in list(self._documents.items()):
-            self._update_import_graph(path, doc)
-        self._apply_overrides()
-        for path, doc in list(self._documents.items()):
-            self._update_import_graph(path, doc)
-        if _debug:
-            print(f'[GrammarIndex] pre-resolving imports for {len(self._documents)} documents...', flush=True)
-        for doc in self._documents.values():
-            self.pre_resolve_grammar_imports(doc)
-        if _debug:
-            print(f'[GrammarIndex] workspace scan complete: {len(self._documents)} documents', flush=True)
+            print(f'[GrammarIndex] loading from cache {cache.cache_dir}', flush=True)
+        for path, doc in cache.load_documents().items():
+            if self._should_exclude(path):
+                continue
+            self._add_document(path, doc)
+        self._rebuild_import_graph()
+
+    def _import_closure(self, start: Path) -> set[Path]:
+        """Return all files reachable from *start* through forward imports."""
+        closure: set[Path] = set()
+        stack: list[Path] = [start]
+        while stack:
+            path = stack.pop()
+            if path in closure:
+                continue
+            closure.add(path)
+            for imp_path in self._imports.get(path, set()):
+                if imp_path not in closure:
+                    stack.append(imp_path)
+        return closure
+
+    def _post_order(self, paths: set[Path]) -> list[Path]:
+        """Return an import-leaves-first ordering of *paths*."""
+        order: list[Path] = []
+        visited: set[Path] = set()
+        stack: list[tuple[Path, bool]] = [(p, False) for p in paths]
+        while stack:
+            path, processed = stack.pop()
+            if path not in paths or path in self._resolved:
+                continue
+            if processed:
+                if path not in visited:
+                    visited.add(path)
+                    order.append(path)
+                continue
+            if path in visited:
+                continue
+            stack.append((path, True))
+            for imp_path in self._imports.get(path, set()):
+                if imp_path in paths and imp_path not in visited and imp_path not in self._resolved:
+                    stack.append((imp_path, False))
+        return order
+
+    def ensure_resolved(self, file_path: Path) -> None:
+        """Ensure *file_path* and all files it transitively imports are pre-resolved."""
+        with self._resolve_lock:
+            if file_path in self._resolved:
+                return
+            closure = self._import_closure(file_path)
+            memo = self.build_pyjsgf_memo()
+            order = self._post_order(closure)
+        for path in order:
+            with self._resolve_lock:
+                if path in self._resolved:
+                    continue
+                doc = self._documents.get(path)
+                if doc and doc.pyjsgf_grammar:
+                    self.pre_resolve_grammar_imports(doc, memo)
+                self._resolved.add(path)
 
     # ------------------------------------------------------------------ #
     #  Incremental updates                                                 #
@@ -115,10 +211,12 @@ class GrammarIndex:
         self._reindex_grammar_name(path, doc)
         affected = self._update_import_graph(path, doc)
         # Pre-resolve imports for all affected documents so Rule.matches() works
+        memo = self.build_pyjsgf_memo()
         for aff_path in affected:
             aff_doc = self._documents.get(aff_path)
             if aff_doc:
-                self.pre_resolve_grammar_imports(aff_doc)
+                self.pre_resolve_grammar_imports(aff_doc, memo)
+                self._resolved.add(aff_path)
         return affected
 
     def remove_file(self, path: Path) -> set[Path]:
@@ -237,7 +335,7 @@ class GrammarIndex:
                 memo[doc.grammar_name] = doc.pyjsgf_grammar
         return memo
 
-    def pre_resolve_grammar_imports(self, doc: 'GrammarDocument') -> None:
+    def pre_resolve_grammar_imports(self, doc: 'GrammarDocument', memo: dict | None = None) -> None:
         """
         Pre-resolve imports for *doc*'s pyjsgf Grammar using the workspace index.
         This must be called before using Rule.matches() on any rule that imports
@@ -245,7 +343,8 @@ class GrammarIndex:
         """
         if doc.pyjsgf_grammar is None:
             return
-        memo = self.build_pyjsgf_memo()
+        if memo is None:
+            memo = self.build_pyjsgf_memo()
         try:
             doc.pyjsgf_grammar.resolve_imports(memo)
         except Exception:

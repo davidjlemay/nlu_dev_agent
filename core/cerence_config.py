@@ -23,6 +23,8 @@ class CerenceWorkspace:
     features_json: Path | None
     grammar_aliases: dict[str, str] = field(default_factory=dict)
     grammar_overrides: dict[str, str] = field(default_factory=dict)
+    config_path: Path | None = None
+    dialect_path: Path | None = None
     exclude_patterns: list[str] = field(default_factory=list)
 
 
@@ -94,6 +96,8 @@ class CerenceConfigLoader:
             grammar_aliases=grammar_aliases,
             grammar_overrides=grammar_overrides,
             exclude_patterns=exclude_patterns,
+            config_path=self.config_path,
+            dialect_path=dialect_path,
         )
 
     def _resolve(self, path: str) -> Path:

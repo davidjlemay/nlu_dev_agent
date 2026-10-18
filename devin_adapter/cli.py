@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +16,7 @@ from agent.api import GrammarAgentAPI
 from core.cerence_config import CerenceConfigLoader
 from core.index import GrammarIndex
 from core.loader import DataLoader
+from core.workspace_cache import WorkspaceCache
 from core.validator import (
     validate_dialect,
     validate_engine_capabilities,
@@ -42,7 +44,7 @@ def _diags_to_dicts(diags: list) -> list[dict]:
 
 
 class InProcessRunner:
-    def __init__(self, lang: str, repo_root: Path):
+    def __init__(self, lang: str, repo_root: Path, cache_dir: Path | None = None):
         self.lang = lang
         self.repo_root = repo_root
         config_path = repo_root / '.devin' / 'config' / 'nlu_dev_agent' / f'{lang}.yaml'
@@ -51,11 +53,20 @@ class InProcessRunner:
         ws = CerenceConfigLoader(config_path, repo_root).load()
         self.root = ws.workspace_root if ws.workspace_root.exists() else ws.jsgf_dirs[0]
         self.index = GrammarIndex(self.root, ws.dialect, ws.grammar_aliases, ws.grammar_overrides, ws.exclude_patterns)
-        self.index.index_workspace()
+        if cache_dir:
+            cache = WorkspaceCache(
+                cache_dir,
+                self.root,
+                [ws.config_path, ws.dialect_path, ws.features_json, ws.jsgf_stark],
+            )
+            self.index.index_workspace_from_cache(cache)
+        else:
+            self.index.index_workspace()
         self.loader = DataLoader(ws.data_sources, ws.dialect.lazy_loading, self.root)
         self.api = GrammarAgentAPI(self.index, self.loader)
 
     def validate(self, file_path: Path, source: str | None = None) -> dict:
+        self.index.ensure_resolved(file_path)
         if source is None:
             source = file_path.read_text(encoding='utf-8')
         self.index.update_file(file_path, source)
@@ -67,10 +78,12 @@ class InProcessRunner:
         return {'ok': True, 'valid': len(diags) == 0, 'diagnostics': _diags_to_dicts(diags)}
 
     def coverage(self, rule: str, file_path: Path, utterances: list[str]) -> dict:
+        self.index.ensure_resolved(file_path)
         result = self.api.validate_coverage(rule, file_path, utterances)
         return {'ok': True, **result.as_dict()}
 
     def context(self, file_path: Path, intent: str, examples: list[str], rule: str | None = None) -> dict:
+        self.index.ensure_resolved(file_path)
         if rule:
             rule_examples = self.api.get_examples(rule, file_path, n=20)
             if rule_examples:
@@ -92,6 +105,7 @@ class InProcessRunner:
         utterances: list[str] | None,
         max_expansions: int,
     ) -> dict:
+        self.index.ensure_resolved(file_path)
         try:
             result = self.api.introspect_rule(
                 rule, file_path, path=path,
@@ -110,10 +124,13 @@ def _run_daemon_action(cmd: dict, socket_path: str, timeout: float) -> dict | No
         return None
 
 
-def _start_daemon(socket_path: str, repo_root: Path) -> None:
+def _start_daemon(socket_path: str, repo_root: Path, cache_dir: str | None = None) -> None:
     daemon = Path(__file__).with_name('daemon.py')
+    cmd = [sys.executable, str(daemon), '--socket', socket_path, '--repo-root', str(repo_root)]
+    if cache_dir:
+        cmd += ['--cache-dir', cache_dir]
     subprocess.Popen(
-        [sys.executable, str(daemon), '--socket', socket_path, '--repo-root', str(repo_root)],
+        cmd,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
@@ -132,6 +149,7 @@ def main() -> None:
     parser.add_argument('--path', default='')
     parser.add_argument('--max-expansions', type=int, default=1000)
     parser.add_argument('--socket', '-s', default='.devin/tmp/nlu_dev_agent.sock')
+    parser.add_argument('--cache-dir', default=os.environ.get('NLU_DEV_AGENT_CACHE_DIR'))
     parser.add_argument('--start-daemon', action='store_true')
     parser.add_argument('--timeout', '-t', type=float, default=60.0)
     args = parser.parse_args()
@@ -159,11 +177,12 @@ def main() -> None:
         cmd['max_expansions'] = args.max_expansions
 
     if args.start_daemon:
-        _start_daemon(args.socket, repo_root)
+        _start_daemon(args.socket, repo_root, args.cache_dir)
 
     resp = _run_daemon_action(cmd, args.socket, args.timeout)
     if resp is None and args.action in ('validate', 'coverage', 'context', 'introspect'):
-        runner = InProcessRunner(args.lang, repo_root)
+        cache_dir = Path(args.cache_dir) if args.cache_dir else None
+        runner = InProcessRunner(args.lang, repo_root, cache_dir)
         if args.action == 'validate':
             resp = runner.validate(file_path)
         elif args.action == 'coverage':

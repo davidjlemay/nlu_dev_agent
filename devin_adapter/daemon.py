@@ -18,6 +18,7 @@ from agent.api import GrammarAgentAPI
 from core.cerence_config import CerenceConfigLoader
 from core.index import GrammarIndex
 from core.loader import DataLoader
+from core.workspace_cache import WorkspaceCache
 from core.validator import (
     validate_dialect,
     validate_engine_capabilities,
@@ -28,9 +29,15 @@ from core.validator import (
 class NluDevAgentServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = True
 
-    def __init__(self, socket_path: Path, repo_root: Path):
+    def __init__(
+        self,
+        socket_path: Path,
+        repo_root: Path,
+        cache_dir: Path | None = None,
+    ):
         self.socket_path = Path(socket_path)
         self.repo_root = Path(repo_root)
+        self.cache_dir = Path(cache_dir) if cache_dir else None
         self._lock = threading.Lock()
         self._indices: dict[str, tuple[GrammarIndex, GrammarAgentAPI]] = {}
         if self.socket_path.exists():
@@ -48,11 +55,25 @@ class NluDevAgentServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServ
             ws = CerenceConfigLoader(config_path, self.repo_root).load()
             root = ws.workspace_root if ws.workspace_root.exists() else ws.jsgf_dirs[0]
             index = GrammarIndex(root, ws.dialect, ws.grammar_aliases, ws.grammar_overrides, ws.exclude_patterns)
-            index.index_workspace()
+            if self.cache_dir:
+                cache = WorkspaceCache(
+                    self.cache_dir / lang,
+                    root,
+                    [ws.config_path, ws.dialect_path, ws.features_json, ws.jsgf_stark],
+                )
+                index.index_workspace_from_cache(cache)
+            else:
+                index.index_workspace()
             data_loader = DataLoader(ws.data_sources, ws.dialect.lazy_loading, root)
             api = GrammarAgentAPI(index, data_loader)
             self._indices[lang] = (index, api)
-            return index, api
+
+        threading.Thread(
+            target=index._pre_resolve_all,
+            daemon=True,
+            name=f'pre-resolve-{lang}',
+        ).start()
+        return index, api
 
     def dispatch(self, cmd: dict) -> dict:
         action = cmd.get('action')
@@ -84,6 +105,7 @@ class NluDevAgentServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServ
 
     def _do_validate(self, index: GrammarIndex, cmd: dict) -> dict:
         file_path = Path(cmd['file']).resolve()
+        index.ensure_resolved(file_path)
         source = cmd.get('source')
         if source is None:
             source = file_path.read_text(encoding='utf-8')
@@ -98,12 +120,14 @@ class NluDevAgentServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServ
     def _do_coverage(self, api: GrammarAgentAPI, cmd: dict) -> dict:
         rule = cmd['rule']
         file_path = Path(cmd['file']).resolve()
+        api.index.ensure_resolved(file_path)
         utterances = cmd.get('utterances', [])
         result = api.validate_coverage(rule, file_path, utterances)
         return {'ok': True, **result.as_dict()}
 
     def _do_context(self, api: GrammarAgentAPI, cmd: dict) -> dict:
         file_path = Path(cmd['file']).resolve()
+        api.index.ensure_resolved(file_path)
         intent = cmd.get('intent', '')
         examples = cmd.get('examples', [])
         rule = cmd.get('rule')
@@ -123,6 +147,7 @@ class NluDevAgentServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServ
     def _do_introspect(self, api: GrammarAgentAPI, cmd: dict) -> dict:
         rule = cmd['rule']
         file_path = Path(cmd['file']).resolve()
+        api.index.ensure_resolved(file_path)
         path = cmd.get('path')
         if isinstance(path, str):
             path = [int(p) for p in path.split('.') if p] if path else None
@@ -180,9 +205,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description='nlu_dev_agent Devin daemon')
     parser.add_argument('--socket', '-s', default='.devin/tmp/nlu_dev_agent.sock')
     parser.add_argument('--repo-root', '-r', default=str(Path.cwd()))
+    parser.add_argument(
+        '--cache-dir',
+        default=os.environ.get('NLU_DEV_AGENT_CACHE_DIR'),
+        help='Directory for per-language GrammarDocument caches',
+    )
     args = parser.parse_args()
 
-    server = NluDevAgentServer(Path(args.socket), Path(args.repo_root))
+    cache_dir = Path(args.cache_dir) if args.cache_dir else None
+    server = NluDevAgentServer(Path(args.socket), Path(args.repo_root), cache_dir)
     try:
         server.serve_forever()
     finally:
